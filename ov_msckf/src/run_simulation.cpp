@@ -184,6 +184,10 @@ int main(int argc, char **argv) {
 #elif ROS_AVAILABLE == 2
   viz->visualize_final();
   rclcpp::shutdown();
+  // Release image transport publishers before their static plugin loaders are destroyed.
+  viz.reset();
+  sys.reset();
+  sim.reset();
 #endif
 
   // Done!

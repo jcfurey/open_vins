@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.10)
 project(ov_init)
 
 
@@ -9,7 +9,7 @@ find_package(OpenCV 3 QUIET)
 if (NOT OpenCV_FOUND)
     find_package(OpenCV 4 REQUIRED)
 endif ()
-find_package(Boost REQUIRED COMPONENTS system filesystem thread date_time)
+find_package(Boost REQUIRED CONFIG COMPONENTS filesystem thread date_time)
 find_package(Ceres REQUIRED)
 message(STATUS "OPENCV: " ${OpenCV_VERSION} " | BOOST: " ${Boost_VERSION} " | CERES: " ${Ceres_VERSION})
 
@@ -30,9 +30,10 @@ if (PYTHONLIBS_FOUND AND NOT DISABLE_MATPLOTLIB)
     list(APPEND thirdparty_libraries ${PYTHON_LIBRARIES})
 endif ()
 
-# We need c++14 for ROS2, thus just require it for everybody
-# NOTE: To future self, hope this isn't an issue...
-set(CMAKE_CXX_STANDARD 14)
+# Ceres 2.2 requires C++17; ROS dependencies may request a newer standard.
+if (NOT CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD LESS 17)
+    set(CMAKE_CXX_STANDARD 17)
+endif ()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

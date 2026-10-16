@@ -1,0 +1,11 @@
+/**:
+  ros__parameters:
+    sim_seed_state_init: 0
+    sim_seed_preturb: 0
+    sim_seed_measurements: 0
+    sim_do_perturbation: false
+    sim_distance_threshold: 1.2
+    sim_freq_cam: 10.0
+    sim_freq_imu: 400.0
+    sim_min_feature_gen_dist: 5.0
+    sim_max_feature_gen_dist: 10.0

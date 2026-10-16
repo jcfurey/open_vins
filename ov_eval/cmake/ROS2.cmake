@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.10)
 
 # Find ROS build system
 find_package(ament_cmake REQUIRED)
@@ -39,10 +39,14 @@ list(APPEND LIBRARY_SOURCES
 )
 file(GLOB_RECURSE LIBRARY_HEADERS "src/*.h")
 add_library(ov_eval_lib SHARED ${LIBRARY_SOURCES} ${LIBRARY_HEADERS})
-ament_target_dependencies(ov_eval_lib rclcpp ov_core)
-target_link_libraries(ov_eval_lib ${thirdparty_libraries})
-target_include_directories(ov_eval_lib PUBLIC src/)
+target_compile_definitions(ov_eval_lib PUBLIC ROS_AVAILABLE=2)
+target_link_libraries(ov_eval_lib PUBLIC ov_core::ov_core_lib ${thirdparty_libraries})
+target_include_directories(ov_eval_lib PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<INSTALL_INTERFACE:include>
+)
 install(TARGETS ov_eval_lib
+        EXPORT export_ov_eval
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
         PUBLIC_HEADER DESTINATION include
@@ -53,6 +57,8 @@ install(DIRECTORY src/
 )
 ament_export_include_directories(include)
 ament_export_libraries(ov_eval_lib)
+ament_export_targets(export_ov_eval HAS_LIBRARY_TARGET)
+ament_export_dependencies(ov_core)
 
 ##################################################
 # Make binary files!
@@ -67,52 +73,42 @@ ament_export_libraries(ov_eval_lib)
 #endif ()
 
 add_executable(format_converter src/format_converter.cpp)
-ament_target_dependencies(format_converter rclcpp ov_core)
 target_link_libraries(format_converter ov_eval_lib ${thirdparty_libraries})
 install(TARGETS format_converter DESTINATION lib/${PROJECT_NAME})
 
 add_executable(error_comparison src/error_comparison.cpp)
-ament_target_dependencies(error_comparison rclcpp ov_core)
 target_link_libraries(error_comparison ov_eval_lib ${thirdparty_libraries})
 install(TARGETS error_comparison DESTINATION lib/${PROJECT_NAME})
 
 add_executable(error_dataset src/error_dataset.cpp)
-ament_target_dependencies(error_dataset rclcpp ov_core)
 target_link_libraries(error_dataset ov_eval_lib ${thirdparty_libraries})
 install(TARGETS error_dataset DESTINATION lib/${PROJECT_NAME})
 
 add_executable(error_singlerun src/error_singlerun.cpp)
-ament_target_dependencies(error_singlerun rclcpp ov_core)
 target_link_libraries(error_singlerun ov_eval_lib ${thirdparty_libraries})
 install(TARGETS error_singlerun DESTINATION lib/${PROJECT_NAME})
 
 add_executable(error_simulation src/error_simulation.cpp)
-ament_target_dependencies(error_simulation rclcpp ov_core)
 target_link_libraries(error_simulation ov_eval_lib ${thirdparty_libraries})
 install(TARGETS error_simulation DESTINATION lib/${PROJECT_NAME})
 
 add_executable(timing_comparison src/timing_comparison.cpp)
-ament_target_dependencies(timing_comparison rclcpp ov_core)
 target_link_libraries(timing_comparison ov_eval_lib ${thirdparty_libraries})
 install(TARGETS timing_comparison DESTINATION lib/${PROJECT_NAME})
 
 add_executable(timing_flamegraph src/timing_flamegraph.cpp)
-ament_target_dependencies(timing_flamegraph rclcpp ov_core)
 target_link_libraries(timing_flamegraph ov_eval_lib ${thirdparty_libraries})
 install(TARGETS timing_flamegraph DESTINATION lib/${PROJECT_NAME})
 
 add_executable(timing_histogram src/timing_histogram.cpp)
-ament_target_dependencies(timing_histogram rclcpp ov_core)
 target_link_libraries(timing_histogram ov_eval_lib ${thirdparty_libraries})
 install(TARGETS timing_histogram DESTINATION lib/${PROJECT_NAME})
 
 add_executable(timing_percentages src/timing_percentages.cpp)
-ament_target_dependencies(timing_percentages rclcpp ov_core)
 target_link_libraries(timing_percentages ov_eval_lib ${thirdparty_libraries})
 install(TARGETS timing_percentages DESTINATION lib/${PROJECT_NAME})
 
 add_executable(plot_trajectories src/plot_trajectories.cpp)
-ament_target_dependencies(plot_trajectories rclcpp ov_core)
 target_link_libraries(plot_trajectories ov_eval_lib ${thirdparty_libraries})
 install(TARGETS plot_trajectories DESTINATION lib/${PROJECT_NAME})
 

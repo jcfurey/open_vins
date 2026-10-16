@@ -19,6 +19,57 @@ details on what the system supports.
 * Getting started guide - https://docs.openvins.com/getting-started.html
 * Publication reference - https://pgeneva.com/downloads/papers/Geneva2020ICRA.pdf
 
+## ROS 2 Lyrical host build
+
+For Ubuntu 26.04 with ROS 2 Lyrical, run these commands from the workspace root
+containing `src/open_vins`:
+
+```bash
+source /opt/ros/lyrical/setup.bash
+rosdep install --from-paths src/open_vins --ignore-src --rosdistro lyrical -y
+MAKEFLAGS='-j4' CMAKE_BUILD_PARALLEL_LEVEL=4 colcon build \
+  --base-paths src/open_vins --symlink-install --executor sequential \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release
+source install/setup.bash
+```
+
+This builds all five packages: `ov_core`, `ov_data`, `ov_init`, `ov_msckf`, and
+`ov_eval`. The ROS 2 libraries export CMake targets and inherit the C++ standard
+required by the installed ROS distribution. Boost.System is header-only and
+does not require a separate library.
+
+Start the stereo estimator with the bundled EuRoC calibration:
+
+```bash
+ros2 launch ov_msckf subscribe.launch.py config:=euroc_mav rviz_enable:=false
+```
+
+The estimator waits for images and IMU messages on the topics specified in the
+configuration. Supply a calibrated configuration for your own sensors using
+`config_path:=/absolute/path/to/estimator_config.yaml`.
+
+Run the bundled simulation without a bag or camera:
+
+```bash
+ros2 run ov_msckf run_simulation \
+  "$PWD/src/open_vins/config/euroc_mav/estimator_config.yaml" \
+  --ros-args \
+  --params-file "$PWD/src/open_vins/ov_msckf/launch/simulation_ros2.yaml" \
+  -p sim_traj_path:="$PWD/src/open_vins/ov_data/sim/udel_gore.txt"
+```
+
+The parameter file supplies the simulator's required seeds, rates, and feature
+generation settings. The ROS 2 visualizer owns its background threads and
+releases image transport publishers before process exit.
+
+Verified on 2026-10-16 with Ubuntu 26.04.1, ROS 2 Lyrical, CMake 4.2.3,
+GCC 15.2, Boost 1.90, Ceres 2.2, and OpenCV 4.10. All five packages build,
+and a separate CMake consumer links against the installed libraries. The stereo
+launch accepts test images and IMU samples and exits cleanly on SIGINT. The
+bundled UDel Gore simulation completes with 1,697 finite saved states over
+169.6 seconds of trajectory, with position RMSE 0.068 m and orientation RMSE
+0.201 degrees.
+
 ## News / Events
 
 * **May 11, 2023** - Inertial intrinsic support released as part of v2.7 along with a few bug fixes and improvements to stereo KLT tracking. Please check out the [release page](https://github.com/rpng/open_vins/releases/tag/v2.7) for details.

@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.10)
 
 # Find ROS build system
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -11,6 +12,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
+find_package(message_filters REQUIRED)
 find_package(ov_core REQUIRED)
 find_package(ov_init REQUIRED)
 
@@ -35,18 +37,20 @@ list(APPEND thirdparty_libraries
         ${CERES_LIBRARIES}
         ${OpenCV_LIBRARIES}
 )
-list(APPEND ament_libraries
-        rclcpp
-        tf2_ros
-        tf2_geometry_msgs
-        std_msgs
-        geometry_msgs
-        sensor_msgs
-        nav_msgs
-        cv_bridge
-        image_transport
-        ov_core
-        ov_init
+list(APPEND ros_libraries
+        rclcpp::rclcpp
+        tf2::tf2
+        tf2_ros::tf2_ros
+        tf2_geometry_msgs::tf2_geometry_msgs
+        ${std_msgs_TARGETS}
+        ${geometry_msgs_TARGETS}
+        ${sensor_msgs_TARGETS}
+        ${nav_msgs_TARGETS}
+        cv_bridge::cv_bridge
+        image_transport::image_transport
+        message_filters::message_filters
+        ov_core::ov_core_lib
+        ov_init::ov_init_lib
 )
 
 ##################################################
@@ -69,10 +73,14 @@ list(APPEND LIBRARY_SOURCES
 list(APPEND LIBRARY_SOURCES src/ros/ROS2Visualizer.cpp src/ros/ROSVisualizerHelper.cpp)
 file(GLOB_RECURSE LIBRARY_HEADERS "src/*.h")
 add_library(ov_msckf_lib SHARED ${LIBRARY_SOURCES} ${LIBRARY_HEADERS})
-ament_target_dependencies(ov_msckf_lib ${ament_libraries})
-target_link_libraries(ov_msckf_lib ${thirdparty_libraries})
-target_include_directories(ov_msckf_lib PUBLIC src/)
+target_compile_definitions(ov_msckf_lib PUBLIC ROS_AVAILABLE=2)
+target_link_libraries(ov_msckf_lib PUBLIC ${ros_libraries} ${thirdparty_libraries})
+target_include_directories(ov_msckf_lib PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<INSTALL_INTERFACE:include>
+)
 install(TARGETS ov_msckf_lib
+        EXPORT export_ov_msckf
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
         PUBLIC_HEADER DESTINATION include
@@ -83,28 +91,26 @@ install(DIRECTORY src/
 )
 ament_export_include_directories(include)
 ament_export_libraries(ov_msckf_lib)
+ament_export_targets(export_ov_msckf HAS_LIBRARY_TARGET)
+ament_export_dependencies(rclcpp tf2 tf2_ros tf2_geometry_msgs std_msgs geometry_msgs sensor_msgs nav_msgs cv_bridge image_transport message_filters ov_core ov_init Ceres)
 
 ##################################################
 # Make binary files!
 ##################################################
 
 add_executable(run_subscribe_msckf src/run_subscribe_msckf.cpp)
-ament_target_dependencies(run_subscribe_msckf ${ament_libraries})
 target_link_libraries(run_subscribe_msckf ov_msckf_lib ${thirdparty_libraries})
 install(TARGETS run_subscribe_msckf DESTINATION lib/${PROJECT_NAME})
 
 add_executable(run_simulation src/run_simulation.cpp)
-ament_target_dependencies(run_simulation ${ament_libraries})
 target_link_libraries(run_simulation ov_msckf_lib ${thirdparty_libraries})
 install(TARGETS run_simulation DESTINATION lib/${PROJECT_NAME})
 
 add_executable(test_sim_meas src/test_sim_meas.cpp)
-ament_target_dependencies(test_sim_meas ${ament_libraries})
 target_link_libraries(test_sim_meas ov_msckf_lib ${thirdparty_libraries})
 install(TARGETS test_sim_meas DESTINATION lib/${PROJECT_NAME})
 
 add_executable(test_sim_repeat src/test_sim_repeat.cpp)
-ament_target_dependencies(test_sim_repeat ${ament_libraries})
 target_link_libraries(test_sim_repeat ov_msckf_lib ${thirdparty_libraries})
 install(TARGETS test_sim_repeat DESTINATION lib/${PROJECT_NAME})
 
