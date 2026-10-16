@@ -3,7 +3,11 @@
 #include <limits>
 
 #include "ros/ROSVisualizerHelper.h"
+#include "core/VioManager.h"
+#include "cam/CamRadtan.h"
+#include "track/TrackSIM.h"
 #include "ros/Ros2Covariance.h"
+#include "ros/Ros2ResetOptions.h"
 #include "state/Propagator.h"
 #include "state/State.h"
 #include "state/StateHelper.h"
@@ -19,6 +23,106 @@ std::shared_ptr<State> state() {
   return std::make_shared<State>(options);
 }
 } // namespace
+
+namespace {
+VioManagerOptions stereo_options() {
+  VioManagerOptions options;
+  options.state_options.num_cameras = 2;
+  options.init_options.num_cameras = 2;
+  options.use_aruco = false;
+  options.vec_dw << 1, 0, 0, 1, 0, 1;
+  options.vec_da = options.vec_dw;
+  options.vec_tg.setZero();
+  options.q_ACCtoIMU << 0, 0, 0, 1;
+  options.q_GYROtoIMU = options.q_ACCtoIMU;
+  options.featinit_options.max_cond_number = 1e6;
+  for (size_t id = 0; id < 2; ++id) {
+    auto camera = std::make_shared<ov_core::CamRadtan>(320, 240);
+    Eigen::Matrix<double, 8, 1> calibration;
+    calibration << 200, 200, 160, 120, 0, 0, 0, 0;
+    camera->set_value(calibration);
+    options.camera_intrinsics[id] = camera;
+    Eigen::VectorXd extrinsic(7);
+    extrinsic << 0, 0, 0, 1, -static_cast<double>(id), 0, 0;
+    options.camera_extrinsics[id] = extrinsic;
+  }
+  options.init_options.camera_intrinsics = options.camera_intrinsics;
+  options.init_options.camera_extrinsics = options.camera_extrinsics;
+  return options;
+}
+
+class ActiveTrackManager : public VioManager {
+public:
+  explicit ActiveTrackManager(VioManagerOptions &options) : VioManager(options) {
+    tracker = std::make_shared<ov_core::TrackSIM>(options.camera_intrinsics, 0);
+    trackFEATS = tracker;
+    Eigen::Matrix<double, 17, 1> truth = Eigen::Matrix<double, 17, 1>::Zero();
+    truth(0) = 10;
+    truth(4) = 1;
+    initialize_with_gt(truth);
+  }
+  void frame(double time) {
+    state->_timestamp = time;
+    StateHelper::augment_clone(state, Eigen::Vector3d::Zero());
+    Eigen::VectorXf left(2), right(2);
+    left << 160, 120;
+    right << 120, 120;
+    tracker->feed_measurement_simulation(time, {0, 1}, {{{42, left}}, {{42, right}}});
+    ov_core::CameraData message;
+    message.timestamp = time;
+    message.sensor_ids = {0, 1};
+    message.images = {cv::Mat::zeros(240, 320, CV_8UC1), cv::Mat::zeros(240, 320, CV_8UC1)};
+    retriangulate_active_tracks(message);
+  }
+  const auto &points() const { return active_tracks_posinG; }
+  const auto &counts() const { return active_feat_linsys_count; }
+private:
+  std::shared_ptr<ov_core::TrackSIM> tracker;
+};
+} // namespace
+
+TEST(ActiveStereoTracks, AccumulatesBothBearingsWithoutTemporalMotion) {
+  auto options = stereo_options();
+  ActiveTrackManager manager(options);
+  manager.set_active_image_enabled(false);
+  manager.frame(10);
+  ASSERT_EQ(manager.counts().size(), 1U);
+  EXPECT_EQ(manager.counts().begin()->second, 2);
+  manager.frame(10.05);
+  ASSERT_EQ(manager.points().size(), 1U);
+  EXPECT_NEAR((manager.points().begin()->second - Eigen::Vector3d(0, 0, 5)).norm(), 0, 1e-6);
+  double time;
+  cv::Mat image;
+  manager.get_active_image(time, image);
+  EXPECT_TRUE(image.empty());
+  // A consumer arriving later gets an image while keeping accumulated geometry.
+  manager.set_active_image_enabled(true);
+  manager.frame(10.1);
+  manager.get_active_image(time, image);
+  EXPECT_EQ(image.size(), cv::Size(320, 240));
+  EXPECT_EQ(manager.counts().begin()->second, 6);
+}
+
+TEST(Ros2ResetCalibration, RestoresIndependentCameraModelsAcrossRepeatedEpochs) {
+  auto original = stereo_options();
+  auto fisheye = std::make_shared<ov_core::CamEqui>(320, 240);
+  fisheye->set_value(original.camera_intrinsics.at(1)->get_value());
+  original.camera_intrinsics[1] = original.init_options.camera_intrinsics[1] = fisheye;
+  const auto snapshot = copy_ros2_reset_options(original);
+  auto changed = original.camera_intrinsics.at(0)->get_value();
+  changed(0) = 250;
+  original.camera_intrinsics.at(0)->set_value(changed);
+  EXPECT_DOUBLE_EQ(snapshot.camera_intrinsics.at(0)->get_value()(0), 200);
+  for (int epoch = 0; epoch < 3; ++epoch) {
+    auto options = copy_ros2_reset_options(snapshot);
+    EXPECT_TRUE(std::dynamic_pointer_cast<ov_core::CamEqui>(options.camera_intrinsics.at(1)));
+    EXPECT_DOUBLE_EQ(options.camera_intrinsics.at(0)->get_value()(0), 200);
+    options.camera_intrinsics.at(0)->set_value(changed);
+    options.init_options.camera_intrinsics.at(1)->set_value(changed);
+    EXPECT_DOUBLE_EQ(snapshot.camera_intrinsics.at(0)->get_value()(0), 200);
+    EXPECT_DOUBLE_EQ(snapshot.init_options.camera_intrinsics.at(1)->get_value()(0), 200);
+  }
+}
 
 TEST(ImuInterpolation, IncludesExactEndpoints) {
   auto selected = Propagator::select_imu_readings({imu(0), imu(1, 1), imu(2, 2)}, 0, 2, false);

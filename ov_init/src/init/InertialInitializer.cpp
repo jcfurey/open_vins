@@ -21,6 +21,8 @@
 
 #include "InertialInitializer.h"
 
+#include <algorithm>
+
 #ifndef __ANDROID__
 #include "dynamic/DynamicInitializer.h"
 #endif
@@ -62,17 +64,11 @@ void InertialInitializer::feed_imu(const ov_core::ImuData &message, double oldes
   //    return i.timestamp < j.timestamp;
   //});
 
-  // Loop through and delete imu messages that are older than our requested time
-  // std::cout << "INIT: imu_data.size() " << imu_data->size() << std::endl;
+  // Compact once instead of shifting the remaining history for every old sample.
   if (oldest_time != -1) {
-    auto it0 = imu_data->begin();
-    while (it0 != imu_data->end()) {
-      if (it0->timestamp < oldest_time) {
-        it0 = imu_data->erase(it0);
-      } else {
-        it0++;
-      }
-    }
+    imu_data->erase(std::remove_if(imu_data->begin(), imu_data->end(),
+                                  [oldest_time](const ImuData &data) { return data.timestamp < oldest_time; }),
+                    imu_data->end());
   }
 }
 
@@ -96,10 +92,10 @@ bool InertialInitializer::initialize(double &timestamp, Eigen::MatrixXd &covaria
   // Remove all measurements that are older then our initialization window
   // Then we will try to use all features that are in the feature database!
   _db->cleanup_measurements(oldest_time);
-  auto it_imu = imu_data->begin();
-  while (it_imu != imu_data->end() && it_imu->timestamp < oldest_time + params.calib_camimu_dt) {
-    it_imu = imu_data->erase(it_imu);
-  }
+  const auto first_current_imu = std::find_if_not(imu_data->begin(), imu_data->end(), [&](const ImuData &data) {
+    return data.timestamp < oldest_time + params.calib_camimu_dt;
+  });
+  imu_data->erase(imu_data->begin(), first_current_imu);
 
   // Compute the disparity of the system at the current timestep
   // If disparity is zero or negative we will always use the static initializer

@@ -92,6 +92,22 @@ are rejected. An initialized estimator resets after the configured IMU history
 limit without a camera update; pre-initialization IMU history uses the
 initialization window. Resets clear published path history. Shutdown logs ingress
 counts, drops, invalid input, queue peaks, and ingress-triggered resets.
+Reset calibration snapshots own independent camera models, so online intrinsic
+updates cannot change the configured calibration used by later epochs.
+
+The bundled EuRoC configuration uses static initialization with a stationary
+window followed by motion. `init_dyn_use:=true` additionally permits dynamic
+initialization when visual and inertial motion provide enough information;
+the existing rotation, conditioning, and covariance checks remain active.
+`try_zupt` also changes startup policy by allowing a stationary start without
+waiting for motion, so it should be evaluated with the zero-velocity detector
+and trajectory accuracy. These settings are not interchangeable.
+
+`num_pts` is a total tracking target divided uniformly across the configured
+cameras, rounded down per camera. For stereo, `num_pts:=200` requests a target
+of 100 tracks per camera. `init_max_features` is split in the same way during
+initialization. Optional loop/depth image drawing is skipped in ROS 2 without
+loop/depth consumers; active geometry continues to update for later subscribers.
 
 Loaded YAML settings and ROS overrides are declared as read-only startup
 parameters. They can be inspected using ROS parameter services; changing them
@@ -130,8 +146,9 @@ message type for downstream compatibility; ordinary feature clouds use
 Build with `-DBUILD_TESTING=ON`, then run from the workspace root:
 
 ```bash
-colcon test --base-paths src/open_vins --packages-select ov_core ov_msckf
+colcon test --base-paths src/open_vins --packages-select ov_core ov_init ov_msckf
 colcon test-result --test-result-base build/ov_core --verbose
+colcon test-result --test-result-base build/ov_init --verbose
 colcon test-result --test-result-base build/ov_msckf --verbose
 ROS_DOMAIN_ID=126 python3 src/open_vins/ov_msckf/test/ros2_runtime_smoke.py \
   --executable install/ov_msckf/lib/ov_msckf/run_subscribe_msckf \
@@ -139,7 +156,9 @@ ROS_DOMAIN_ID=126 python3 src/open_vins/ov_msckf/test/ros2_runtime_smoke.py \
   --output .colcon/open-vins-runtime-smoke
 ```
 
-The C++ tests cover stereo exclusion masks, IMU interval interpolation, missing
+The C++ tests cover stereo exclusion masks and bearing accumulation, static
+startup policy and bias recovery, history trimming, late image consumers,
+independent reset calibration snapshots, IMU interval interpolation, missing
 coverage, nonzero clock offsets, covariance frame conversion, invalid EKF
 innovations, empty and populated PointCloud2 serialization, queue limits,
 ordering, concurrent producers/consumers, and shutdown.
@@ -162,12 +181,21 @@ colcon build --base-paths src/open_vins --packages-up-to ov_msckf \
   '-DCMAKE_CXX_FLAGS_DEBUG=-O1 -g1 -fno-omit-frame-pointer'
 source .colcon/open-vins-asan/install/setup.bash
 ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  colcon test --base-paths src/open_vins --packages-select ov_core ov_init ov_msckf \
+    --build-base .colcon/open-vins-asan/build \
+    --install-base .colcon/open-vins-asan/install
+ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 ROS_DOMAIN_ID=126 \
   python3 src/open_vins/ov_msckf/test/ros2_runtime_smoke.py \
     --executable .colcon/open-vins-asan/install/ov_msckf/lib/ov_msckf/run_subscribe_msckf \
     --config src/open_vins/config/euroc_mav/estimator_config.yaml \
     --output .colcon/open-vins-asan/runtime --raw-only
 ```
+
+Use the matching `--build-base` and `--install-base` when testing an instrumented
+overlay; selecting native libraries for an instrumented test can mix incompatible
+Eigen allocation conventions.
 
 On the verified Lyrical host, loading all installed image transports leaves a
 157-byte ROS type-support allocation at exit, also reproduced with a standalone
@@ -185,7 +213,7 @@ bundled UDel Gore simulation completes with 1,697 finite saved states over
 169.6 seconds of trajectory, with position RMSE 0.068 m and orientation RMSE
 0.201 degrees.
 
-The ROS 2 hardening pass additionally passes 24 C++ regression tests, the ROS
+The ROS 2 hardening and initialization passes include 32 C++ regression tests, the ROS
 runtime/parameter/shutdown checks, and 11 standalone queue tests under
 ThreadSanitizer. ASan/UBSan/LeakSanitizer pass the C++ suite and a sensor replay
 with raw image transports. Instrumented playback exercises bounded camera

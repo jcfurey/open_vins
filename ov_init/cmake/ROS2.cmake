@@ -85,6 +85,12 @@ install(TARGETS test_dynamic_init DESTINATION lib/${PROJECT_NAME})
 # Install launch and config directories
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch/)
 
+if(BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    ament_add_gtest(test_initialization test/test_initialization.cpp)
+    target_link_libraries(test_initialization ov_init_lib)
+endif()
+
 # finally define this as the package
 ament_package()
 

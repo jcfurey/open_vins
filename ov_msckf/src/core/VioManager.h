@@ -82,6 +82,10 @@ public:
    */
   void feed_measurement_camera(const ov_core::CameraData &message) { track_image_and_update(message); }
 
+  /// Control optional loop/depth image drawing from the estimator's owning thread.
+  /// Geometry history continues to update so newly connected consumers can use the next frame.
+  void set_active_image_enabled(bool enabled) { active_image_enabled = enabled; }
+
   /**
    * @brief Feed function for a synchronized simulated cameras
    * @param timestamp Time that this image was collected
@@ -242,6 +246,7 @@ protected:
   std::unordered_map<size_t, Eigen::Vector3d> active_tracks_posinG;
   std::unordered_map<size_t, Eigen::Vector3d> active_tracks_uvd;
   cv::Mat active_image;
+  bool active_image_enabled = true;
   std::map<size_t, Eigen::Matrix3d> active_feat_linsys_A;
   std::map<size_t, Eigen::Vector3d> active_feat_linsys_b;
   std::map<size_t, int> active_feat_linsys_count;

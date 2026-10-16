@@ -200,7 +200,8 @@ void VioManager::retriangulate_active_tracks(const ov_core::CameraData &message)
   assert(state->_clones_IMU.find(message.timestamp) != state->_clones_IMU.end());
   active_tracks_time = message.timestamp;
   active_image = cv::Mat();
-  trackFEATS->display_active(active_image, 255, 255, 255, 255, 255, 255, " ");
+  if (active_image_enabled)
+    trackFEATS->display_active(active_image, 255, 255, 255, 255, 255, 255, " ");
   if (!active_image.empty()) {
     active_image = active_image(cv::Rect(0, 0, message.images.at(0).cols, message.images.at(0).rows));
   }
@@ -262,15 +263,23 @@ void VioManager::retriangulate_active_tracks(const ov_core::CameraData &message)
       // Append to our linear system
       Eigen::Matrix3d Ai = Bperp.transpose() * Bperp;
       Eigen::Vector3d bi = Ai * p_CiinG;
-      if (active_feat_linsys_A.find(featid) == active_feat_linsys_A.end()) {
-        active_feat_linsys_A_new.insert({featid, Ai});
-        active_feat_linsys_b_new.insert({featid, bi});
-        active_feat_linsys_count_new.insert({featid, 1});
-      } else {
-        active_feat_linsys_A_new[featid] = Ai + active_feat_linsys_A[featid];
-        active_feat_linsys_b_new[featid] = bi + active_feat_linsys_b[featid];
-        active_feat_linsys_count_new[featid] = 1 + active_feat_linsys_count[featid];
+      // Carry history once, then accumulate every camera's bearing in this frame.
+      // Reusing the old system for each camera discards the other stereo observation.
+      if (active_feat_linsys_A_new.find(featid) == active_feat_linsys_A_new.end()) {
+        const auto previous = active_feat_linsys_A.find(featid);
+        if (previous == active_feat_linsys_A.end()) {
+          active_feat_linsys_A_new[featid] = Eigen::Matrix3d::Zero();
+          active_feat_linsys_b_new[featid] = Eigen::Vector3d::Zero();
+          active_feat_linsys_count_new[featid] = 0;
+        } else {
+          active_feat_linsys_A_new[featid] = previous->second;
+          active_feat_linsys_b_new[featid] = active_feat_linsys_b.at(featid);
+          active_feat_linsys_count_new[featid] = active_feat_linsys_count.at(featid);
+        }
       }
+      active_feat_linsys_A_new[featid] += Ai;
+      active_feat_linsys_b_new[featid] += bi;
+      ++active_feat_linsys_count_new[featid];
 
       // For this feature, recover its 3d position if we have enough observations!
       if (active_feat_linsys_count_new.at(featid) > 3) {
@@ -291,7 +300,7 @@ void VioManager::retriangulate_active_tracks(const ov_core::CameraData &message)
         // If we have a bad condition number, or it is too close
         // Then set the flag for bad (i.e. set z-axis to nan)
         if (std::abs(condA) <= params.featinit_options.max_cond_number && p_FinCi(2, 0) >= params.featinit_options.min_dist &&
-            p_FinCi(2, 0) <= params.featinit_options.max_dist && !std::isnan(p_FinCi.norm())) {
+            p_FinCi(2, 0) <= params.featinit_options.max_dist && p_FinCi.allFinite()) {
           active_tracks_posinG_new[featid] = p_FinG;
         }
       }

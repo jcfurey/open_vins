@@ -21,6 +21,8 @@
 
 #include "DynamicInitializer.h"
 
+#include <algorithm>
+
 #include "ceres/Factor_GenericPrior.h"
 #include "ceres/Factor_ImageReprojCalib.h"
 #include "ceres/Factor_ImuCPIv1.h"
@@ -63,12 +65,11 @@ bool DynamicInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarian
   // Remove all measurements that are older than our initialization window
   // Then we will try to use all features that are in the feature database!
   _db->cleanup_measurements(oldest_time);
-  bool have_old_imu_readings = false;
-  auto it_imu = imu_data->begin();
-  while (it_imu != imu_data->end() && it_imu->timestamp < oldest_time + params.calib_camimu_dt) {
-    have_old_imu_readings = true;
-    it_imu = imu_data->erase(it_imu);
-  }
+  const auto first_current_imu = std::find_if_not(imu_data->begin(), imu_data->end(), [&](const ImuData &data) {
+    return data.timestamp < oldest_time + params.calib_camimu_dt;
+  });
+  const bool have_old_imu_readings = first_current_imu != imu_data->begin();
+  imu_data->erase(imu_data->begin(), first_current_imu);
   if (_db->get_internal_data().size() < 0.75 * params.init_max_features) {
     PRINT_WARNING(RED "[init-d]: only %zu valid features of required (%.0f thresh)!!\n" RESET, _db->get_internal_data().size(),
                   0.95 * params.init_max_features);

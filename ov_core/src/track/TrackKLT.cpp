@@ -21,6 +21,8 @@
 
 #include "TrackKLT.h"
 
+#include <unordered_set>
+
 #include "Grider_FAST.h"
 #include "Grider_GRID.h"
 #include "cam/CamBase.h"
@@ -302,22 +304,24 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   std::vector<cv::KeyPoint> good_left, good_right;
   std::vector<size_t> good_ids_left, good_ids_right;
 
+  // Keep original track order, with constant-time ID lookup in the other camera.
+  std::unordered_map<size_t, size_t> right_indices;
+  right_indices.reserve(ids_right_old.size());
+  for (size_t i = 0; i < ids_right_old.size(); ++i)
+    right_indices.emplace(ids_right_old[i], i);
+  std::unordered_set<size_t> added_right_ids;
+  added_right_ids.reserve(ids_right_old.size());
+
   // Loop through all left points
   for (size_t i = 0; i < pts_left_new.size(); i++) {
     // Ensure we do not have any bad KLT tracks (i.e., points are negative)
-    if (pts_left_new.at(i).pt.x < 0 || pts_left_new.at(i).pt.y < 0 || (int)pts_left_new.at(i).pt.x > img_left.cols ||
-        (int)pts_left_new.at(i).pt.y > img_left.rows)
+    if (pts_left_new.at(i).pt.x < 0 || pts_left_new.at(i).pt.y < 0 || (int)pts_left_new.at(i).pt.x >= img_left.cols ||
+        (int)pts_left_new.at(i).pt.y >= img_left.rows)
       continue;
     // See if we have the same feature in the right
-    bool found_right = false;
-    size_t index_right = 0;
-    for (size_t n = 0; n < ids_right_old.size(); n++) {
-      if (ids_left_old.at(i) == ids_right_old.at(n)) {
-        found_right = true;
-        index_right = n;
-        break;
-      }
-    }
+    const auto right = right_indices.find(ids_left_old.at(i));
+    const bool found_right = right != right_indices.end();
+    const size_t index_right = found_right ? right->second : 0;
     // If it is a good track, and also tracked from left to right
     // Else track it as a mono feature in just the left image
     if (mask_ll[i] && found_right && mask_rr[index_right]) {
@@ -329,6 +333,7 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
       good_right.push_back(pts_right_new.at(index_right));
       good_ids_left.push_back(ids_left_old.at(i));
       good_ids_right.push_back(ids_right_old.at(index_right));
+      added_right_ids.insert(ids_right_old.at(index_right));
       // PRINT_DEBUG("adding to stereo - %u , %u\n", ids_left_old.at(i), ids_right_old.at(index_right));
     } else if (mask_ll[i]) {
       good_left.push_back(pts_left_new.at(i));
@@ -344,11 +349,12 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
         (int)pts_right_new.at(i).pt.y >= img_right.rows)
       continue;
     // See if we have the same feature in the right
-    bool added_already = (std::find(good_ids_right.begin(), good_ids_right.end(), ids_right_old.at(i)) != good_ids_right.end());
+    bool added_already = added_right_ids.find(ids_right_old.at(i)) != added_right_ids.end();
     // If it has not already been added as a good feature, add it as a mono track
     if (mask_rr[i] && !added_already) {
       good_right.push_back(pts_right_new.at(i));
       good_ids_right.push_back(ids_right_old.at(i));
+      added_right_ids.insert(ids_right_old.at(i));
       // PRINT_DEBUG("adding to right - %u \n", ids_right_old.at(i));
     }
   }

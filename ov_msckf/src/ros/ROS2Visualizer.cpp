@@ -20,6 +20,7 @@
  */
 
 #include "ROS2Visualizer.h"
+#include "Ros2ResetOptions.h"
 
 #include "core/VioManager.h"
 #include "ros/ROSVisualizerHelper.h"
@@ -48,7 +49,7 @@ double sensor_time(const builtin_interfaces::msg::Time &stamp) {
 ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_ptr<VioManager> app, std::shared_ptr<Simulator> sim,
                                std::shared_ptr<YamlParser> parser)
     : _node(std::move(node)), _app(std::move(app)), _sim(std::move(sim)),
-      sensor_options(std::make_unique<VioManagerOptions>(_app->get_params())) {
+      sensor_options(std::make_unique<VioManagerOptions>(copy_ros2_reset_options(_app->get_params()))) {
 
   node = _node;
   auto integer = [&](const std::string &name, int value, int minimum, int maximum) {
@@ -218,7 +219,7 @@ void ROS2Visualizer::stop() {
 
 void ROS2Visualizer::reset_estimator() {
   RCLCPP_WARN(_node->get_logger(), "Resetting estimator after an IMU discontinuity or exceeded history limit");
-  auto options = *sensor_options;
+  auto options = copy_ros2_reset_options(*sensor_options);
   options.use_multi_threading_subs = false;
   options.use_multi_threading_pubs = false;
   _app = std::make_shared<VioManager>(options);
@@ -247,6 +248,7 @@ void ROS2Visualizer::run_estimator() {
       if (batch.camera) {
         last_camera_time = batch.camera->timestamp;
         last_camera_imu_time = last_camera_time + _app->get_state()->_calib_dt_CAMtoIMU->value()(0);
+        _app->set_active_image_enabled(has_loopclosure_subscribers());
         _app->feed_measurement_camera(*batch.camera);
         visualize();
       }
@@ -842,10 +844,14 @@ void ROS2Visualizer::publish_groundtruth() {
   //==========================================================================
 }
 
+bool ROS2Visualizer::has_loopclosure_subscribers() const {
+  return pub_loop_pose->get_subscription_count() != 0 || pub_loop_point->get_subscription_count() != 0 ||
+         pub_loop_extrinsic->get_subscription_count() != 0 || pub_loop_intrinsics->get_subscription_count() != 0 ||
+         it_pub_loop_img_depth.getNumSubscribers() != 0 || it_pub_loop_img_depth_color.getNumSubscribers() != 0;
+}
+
 void ROS2Visualizer::publish_loopclosure_information() {
-  if (pub_loop_pose->get_subscription_count() == 0 && pub_loop_point->get_subscription_count() == 0 &&
-      pub_loop_extrinsic->get_subscription_count() == 0 && pub_loop_intrinsics->get_subscription_count() == 0 &&
-      it_pub_loop_img_depth.getNumSubscribers() == 0 && it_pub_loop_img_depth_color.getNumSubscribers() == 0)
+  if (!has_loopclosure_subscribers())
     return;
 
   // Get the current tracks in this frame
@@ -856,6 +862,9 @@ void ROS2Visualizer::publish_loopclosure_information() {
   cv::Mat active_cam0_image;
   _app->get_active_tracks(active_tracks_time1, active_tracks_posinG, active_tracks_uvd);
   _app->get_active_image(active_tracks_time2, active_cam0_image);
+  // A subscriber can connect after this frame's drawing decision; wait for the next frame.
+  if (active_cam0_image.empty())
+    return;
   if (active_tracks_time1 == -1)
     return;
   if (_app->get_state()->_clones_IMU.find(active_tracks_time1) == _app->get_state()->_clones_IMU.end())

@@ -140,6 +140,7 @@ protected:
   void report_ingress(Ros2MeasurementBuffer::Result result, const char *sensor);
   bool append_image(ov_core::CameraData &message, const sensor_msgs::msg::Image::ConstSharedPtr &image, int camera_id);
   builtin_interfaces::msg::Time measurement_stamp() const;
+  bool has_loopclosure_subscribers() const;
 
   /// Publish the current state
   void publish_state();

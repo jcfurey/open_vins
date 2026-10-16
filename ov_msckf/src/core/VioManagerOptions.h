@@ -417,7 +417,7 @@ struct VioManagerOptions {
   /// If our ROS subscriber callbacks should be async (if sim and serial then this should be no!)
   bool use_multi_threading_subs = false;
 
-  /// The number of points we should extract and track in *each* image frame. This highly effects the computation required for tracking.
+  /// Total tracking target divided uniformly across cameras. This strongly affects tracking cost.
   int num_pts = 150;
 
   /// Fast extraction threshold

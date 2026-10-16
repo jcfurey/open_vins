@@ -40,6 +40,8 @@
     <depend>boost</depend>
     <depend>libceres-dev</depend>
 
+    <test_depend condition="$ROS_VERSION == 2">ament_cmake_gtest</test_depend>
+
     <!-- Note the export is required to expose the executables -->
     <export>
         <build_type condition="$ROS_VERSION == 1">catkin</build_type>
