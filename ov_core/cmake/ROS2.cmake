@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.10)
 # Find ros dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(cv_bridge REQUIRED)
 
 # Describe ROS project
@@ -48,7 +49,7 @@ list(APPEND LIBRARY_SOURCES
 file(GLOB_RECURSE LIBRARY_HEADERS "src/*.h")
 add_library(ov_core_lib SHARED ${LIBRARY_SOURCES} ${LIBRARY_HEADERS})
 target_compile_definitions(ov_core_lib PUBLIC ROS_AVAILABLE=2)
-target_link_libraries(ov_core_lib PUBLIC rclcpp::rclcpp cv_bridge::cv_bridge Eigen3::Eigen ${thirdparty_libraries})
+target_link_libraries(ov_core_lib PUBLIC rclcpp::rclcpp ${rcl_interfaces_TARGETS} cv_bridge::cv_bridge Eigen3::Eigen ${thirdparty_libraries})
 target_include_directories(ov_core_lib PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<INSTALL_INTERFACE:include>
@@ -66,7 +67,7 @@ install(DIRECTORY src/
 ament_export_include_directories(include)
 ament_export_libraries(ov_core_lib)
 ament_export_targets(export_ov_core HAS_LIBRARY_TARGET)
-ament_export_dependencies(Eigen3 OpenCV rclcpp cv_bridge)
+ament_export_dependencies(Eigen3 OpenCV rclcpp rcl_interfaces cv_bridge)
 
 ##################################################
 # Make binary files!
@@ -85,6 +86,12 @@ install(TARGETS test_webcam DESTINATION lib/${PROJECT_NAME})
 add_executable(test_profile src/test_profile.cpp)
 target_link_libraries(test_profile ov_core_lib ${thirdparty_libraries})
 install(TARGETS test_profile DESTINATION lib/${PROJECT_NAME})
+
+if(BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    ament_add_gtest(test_stereo_mask test/test_stereo_mask.cpp)
+    target_link_libraries(test_stereo_mask ov_core_lib)
+endif()
 
 # finally define this as the package
 ament_package(CONFIG_EXTRAS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Dependencies.cmake")

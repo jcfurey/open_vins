@@ -76,7 +76,7 @@ public:
 #if ROS_AVAILABLE == 2
   /**
    * @brief Will visualize the system if we have new things
-   * @param node ROS2 node pointer
+   * @param node ROS2 node pointer, or nullptr to leave the cloud unstamped
    * @param feats Vector of features we will convert into ros format
    * @return ROS pointcloud
    */

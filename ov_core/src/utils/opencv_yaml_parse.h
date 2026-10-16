@@ -30,6 +30,7 @@
 #if ROS_AVAILABLE == 1
 #include <ros/ros.h>
 #elif ROS_AVAILABLE == 2
+#include "ros2_parameters.h"
 #include <rclcpp/rclcpp.hpp>
 #endif
 
@@ -100,7 +101,10 @@ public:
    * @brief Will get the folder this config file is in
    * @return Config folder
    */
-  std::string get_config_folder() { return config_path_.substr(0, config_path_.find_last_of('/')) + "/"; }
+  std::string get_config_folder() {
+    const auto parent = boost::filesystem::path(config_path_).parent_path();
+    return parent.empty() ? "./" : parent.string() + "/";
+  }
 
   /**
    * @brief Check to see if all parameters were read succesfully
@@ -128,15 +132,19 @@ public:
       return;
     }
 #elif ROS_AVAILABLE == 2
-    if (node != nullptr && node->has_parameter(node_name)) {
+    if (has_ros_override(node_name)) {
       PRINT_INFO(GREEN "overriding node " BOLDGREEN "%s" RESET GREEN " with value from ROS!\n" RESET, node_name.c_str());
-      node->get_parameter<T>(node_name, node_result);
+      node_result = startup_parameter<T>(*node, node_name, node_result);
       return;
     }
 #endif
 
     // Else we just parse from the YAML file!
     parse_config_yaml(node_name, node_result, required);
+#if ROS_AVAILABLE == 2
+    if (node)
+      node_result = startup_parameter<T>(*node, node_name, node_result);
+#endif
   }
 
   /**
@@ -167,15 +175,19 @@ public:
     }
 #elif ROS_AVAILABLE == 2
     std::string rosnode = sensor_name + "_" + node_name;
-    if (node != nullptr && node->has_parameter(rosnode)) {
+    if (has_ros_override(rosnode)) {
       PRINT_INFO(GREEN "overriding node " BOLDGREEN "%s" RESET GREEN " with value from ROS!\n" RESET, rosnode.c_str());
-      node->get_parameter<T>(rosnode, node_result);
+      node_result = startup_parameter<T>(*node, rosnode, node_result);
       return;
     }
 #endif
 
     // Else we just parse from the YAML file!
     parse_external_yaml(external_node_name, sensor_name, node_name, node_result, required);
+#if ROS_AVAILABLE == 2
+    if (node)
+      node_result = startup_parameter<T>(*node, sensor_name + "_" + node_name, node_result);
+#endif
   }
 
   /**
@@ -211,18 +223,19 @@ public:
     // If we have the ROS parameter, we should just get that one
     // NOTE: for our 3x3 matrix we should read it as an array from ROS then covert it back into the 4x4
     std::string rosnode = sensor_name + "_" + node_name;
-    std::vector<double> matrix_RCtoI;
-    if (node != nullptr && node->has_parameter(rosnode)) {
+    if (has_ros_override(rosnode)) {
       PRINT_INFO(GREEN "overriding node " BOLDGREEN "%s" RESET GREEN " with value from ROS!\n" RESET, rosnode.c_str());
-      node->get_parameter<std::vector<double>>(rosnode, matrix_RCtoI);
-      node_result << matrix_RCtoI.at(0), matrix_RCtoI.at(1), matrix_RCtoI.at(2), matrix_RCtoI.at(3), matrix_RCtoI.at(4), matrix_RCtoI.at(5),
-          matrix_RCtoI.at(6), matrix_RCtoI.at(7), matrix_RCtoI.at(8);
+      ros_matrix(rosnode, node_result);
       return;
     }
 #endif
 
     // Else we just parse from the YAML file!
     parse_external_yaml(external_node_name, sensor_name, node_name, node_result, required);
+#if ROS_AVAILABLE == 2
+    if (node)
+      ros_matrix(sensor_name + "_" + node_name, node_result);
+#endif
   }
 
   /**
@@ -259,51 +272,43 @@ public:
     // If we have the ROS parameter, we should just get that one
     // NOTE: for our 4x4 matrix we should read it as an array from ROS then covert it back into the 4x4
     std::string rosnode = sensor_name + "_" + node_name;
-    std::vector<double> matrix_TCtoI;
-    if (node != nullptr && node->has_parameter(rosnode)) {
+    if (has_ros_override(rosnode)) {
       PRINT_INFO(GREEN "overriding node " BOLDGREEN "%s" RESET GREEN " with value from ROS!\n" RESET, rosnode.c_str());
-      node->get_parameter<std::vector<double>>(rosnode, matrix_TCtoI);
-      node_result << matrix_TCtoI.at(0), matrix_TCtoI.at(1), matrix_TCtoI.at(2), matrix_TCtoI.at(3), matrix_TCtoI.at(4), matrix_TCtoI.at(5),
-          matrix_TCtoI.at(6), matrix_TCtoI.at(7), matrix_TCtoI.at(8), matrix_TCtoI.at(9), matrix_TCtoI.at(10), matrix_TCtoI.at(11),
-          matrix_TCtoI.at(12), matrix_TCtoI.at(13), matrix_TCtoI.at(14), matrix_TCtoI.at(15);
+      ros_matrix(rosnode, node_result);
       return;
     }
 #endif
 
     // Else we just parse from the YAML file!
     parse_external_yaml(external_node_name, sensor_name, node_name, node_result, required);
+#if ROS_AVAILABLE == 2
+    if (node)
+      ros_matrix(sensor_name + "_" + node_name, node_result);
+#endif
   }
 
 #if ROS_AVAILABLE == 2
   /// For ROS2 we need to override the int since it seems to only support int64_t types
   /// https://docs.ros2.org/bouncy/api/rclcpp/classrclcpp_1_1_parameter.html
   void parse_config(const std::string &node_name, int &node_result, bool required = true) {
-    int64_t val = node_result;
-    if (node != nullptr && node->has_parameter(node_name)) {
-      PRINT_INFO(GREEN "overriding node " BOLDGREEN "%s" RESET GREEN " with value from ROS!\n" RESET, node_name.c_str());
-      node->get_parameter<int64_t>(node_name, val);
-      node_result = (int)val;
-      return;
-    }
-    parse_config_yaml(node_name, node_result, required);
+    parse_config<int>(node_name, node_result, required);
   }
   /// For ROS2 we need to override the int since it seems to only support int64_t types
   /// https://docs.ros2.org/bouncy/api/rclcpp/classrclcpp_1_1_parameter.html
   void parse_external(const std::string &external_node_name, const std::string &sensor_name, const std::string &node_name,
                       std::vector<int> &node_result, bool required = true) {
-    std::vector<int64_t> val;
-    for (auto tmp : node_result)
-      val.push_back(tmp);
     std::string rosnode = sensor_name + "_" + node_name;
-    if (node != nullptr && node->has_parameter(rosnode)) {
-      PRINT_INFO(GREEN "overriding node " BOLDGREEN "%s" RESET GREEN " with value from ROS!\n" RESET, rosnode.c_str());
-      node->get_parameter<std::vector<int64_t>>(rosnode, val);
-      node_result.clear();
-      for (auto tmp : val)
-        node_result.push_back((int)tmp);
-      return;
+    if (!has_ros_override(rosnode))
+      parse_external_yaml(external_node_name, sensor_name, node_name, node_result, required);
+    if (node) {
+      std::vector<int64_t> val(node_result.begin(), node_result.end());
+      val = startup_parameter<std::vector<int64_t>>(*node, rosnode, val);
+      for (const auto value : val) {
+        if (value < std::numeric_limits<int>::lowest() || value > std::numeric_limits<int>::max())
+          throw std::invalid_argument(rosnode + " contains an integer outside its supported range");
+      }
+      node_result.assign(val.begin(), val.end());
     }
-    parse_external_yaml(external_node_name, sensor_name, node_name, node_result, required);
   }
 #endif
 
@@ -325,6 +330,31 @@ private:
 #if ROS_AVAILABLE == 2
   /// Our ROS2 rclcpp node pointer
   std::shared_ptr<rclcpp::Node> node = nullptr;
+
+  bool has_ros_override(const std::string &name) const {
+    if (!node)
+      return false;
+    const auto &overrides = node->get_node_parameters_interface()->get_parameter_overrides();
+    return node->has_parameter(name) || overrides.find(name) != overrides.end();
+  }
+
+  template <int N> void ros_matrix(const std::string &name, Eigen::Matrix<double, N, N> &matrix) {
+    std::vector<double> values(N * N, 0.0);
+    if (!has_ros_override(name)) {
+      for (int row = 0; row < N; ++row)
+        for (int col = 0; col < N; ++col)
+          values[row * N + col] = matrix(row, col);
+    }
+    values = startup_parameter<std::vector<double>>(*node, name, values);
+    if (values.size() != N * N)
+      throw std::invalid_argument(name + " has the wrong matrix dimensions");
+    for (int row = 0; row < N; ++row)
+      for (int col = 0; col < N; ++col) {
+        if (!std::isfinite(values[row * N + col]))
+          throw std::invalid_argument(name + " contains a nonfinite matrix value");
+        matrix(row, col) = values[row * N + col];
+      }
+  }
 #endif
 
   /**
@@ -585,17 +615,14 @@ private:
 
     // Create the path the external yaml file
     std::string path;
-    if (!node_found(config->root(), external_node_name)) {
-      PRINT_ERROR(RED "the external node %s could not be found!\n" RESET, external_node_name.c_str());
-      std::exit(EXIT_FAILURE);
-    }
-    (*config)[external_node_name] >> path;
-    std::string relative_folder = config_path_.substr(0, config_path_.find_last_of('/')) + "/";
+    parse_config(external_node_name, path);
+    const auto external_path =
+        boost::filesystem::path(path).is_absolute() ? boost::filesystem::path(path) : boost::filesystem::path(get_config_folder()) / path;
 
     // Now actually try to load them from file!
-    auto config_external = std::make_shared<cv::FileStorage>(relative_folder + path, cv::FileStorage::READ);
+    auto config_external = std::make_shared<cv::FileStorage>(external_path.string(), cv::FileStorage::READ);
     if (!config_external->isOpened()) {
-      PRINT_ERROR(RED "unable to open the configuration file!\n%s\n" RESET, (relative_folder + path).c_str());
+      PRINT_ERROR(RED "unable to open the configuration file!\n%s\n" RESET, external_path.string().c_str());
       std::exit(EXIT_FAILURE);
     }
 

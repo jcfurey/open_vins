@@ -29,6 +29,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <string>
 
 #include "VioManagerOptions.h"
@@ -67,6 +68,7 @@ public:
    * @param params_ Parameters loaded from either ROS or CMDLINE
    */
   VioManager(VioManagerOptions &params_);
+  ~VioManager();
 
   /**
    * @brief Feed function for inertial data
@@ -102,7 +104,7 @@ public:
   double initialized_time() { return startup_time; }
 
   /// Accessor for current system parameters
-  VioManagerOptions get_params() { return params; }
+  const VioManagerOptions &get_params() const { return params; }
 
   /// Accessor to get the current state
   std::shared_ptr<State> get_state() { return state; }
@@ -224,6 +226,8 @@ protected:
 
   // Threads and their atomics
   std::atomic<bool> thread_init_running, thread_init_success;
+  std::thread initialization_thread;
+  double last_imu_timestamp = -1.0;
 
   // If we did a zero velocity update
   bool did_zupt_update = false;

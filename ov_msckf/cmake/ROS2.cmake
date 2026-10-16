@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.10)
 # Find ROS build system
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -39,6 +40,7 @@ list(APPEND thirdparty_libraries
 )
 list(APPEND ros_libraries
         rclcpp::rclcpp
+        ${rcl_interfaces_TARGETS}
         tf2::tf2
         tf2_ros::tf2_ros
         tf2_geometry_msgs::tf2_geometry_msgs
@@ -92,7 +94,7 @@ install(DIRECTORY src/
 ament_export_include_directories(include)
 ament_export_libraries(ov_msckf_lib)
 ament_export_targets(export_ov_msckf HAS_LIBRARY_TARGET)
-ament_export_dependencies(rclcpp tf2 tf2_ros tf2_geometry_msgs std_msgs geometry_msgs sensor_msgs nav_msgs cv_bridge image_transport message_filters ov_core ov_init Ceres)
+ament_export_dependencies(rclcpp rcl_interfaces tf2 tf2_ros tf2_geometry_msgs std_msgs geometry_msgs sensor_msgs nav_msgs cv_bridge image_transport message_filters ov_core ov_init Ceres)
 
 ##################################################
 # Make binary files!
@@ -117,6 +119,14 @@ install(TARGETS test_sim_repeat DESTINATION lib/${PROJECT_NAME})
 # Install launch and config directories
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch/)
 install(DIRECTORY ../config/ DESTINATION share/${PROJECT_NAME}/config/)
+
+if(BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    ament_add_gtest(test_ros2_measurement_buffer test/test_ros2_measurement_buffer.cpp)
+    target_link_libraries(test_ros2_measurement_buffer ov_msckf_lib)
+    ament_add_gtest(test_estimation_regressions test/test_estimation_regressions.cpp)
+    target_link_libraries(test_estimation_regressions ov_msckf_lib)
+endif()
 
 # finally define this as the package
 ament_package()

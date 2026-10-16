@@ -95,7 +95,8 @@ sensor_msgs::msg::PointCloud2 ROSVisualizerHelper::get_ros_pointcloud(std::share
   // Declare message and sizes
   sensor_msgs::msg::PointCloud2 cloud;
   cloud.header.frame_id = "global";
-  cloud.header.stamp = node->now();
+  if (node)
+    cloud.header.stamp = node->now();
   cloud.width = feats.size();
   cloud.height = 1;
   cloud.is_bigendian = false;
@@ -105,6 +106,10 @@ sensor_msgs::msg::PointCloud2 ROSVisualizerHelper::get_ros_pointcloud(std::share
   sensor_msgs::PointCloud2Modifier modifier(cloud);
   modifier.setPointCloud2FieldsByString(1, "xyz");
   modifier.resize(feats.size());
+
+  // PointCloud2Iterator takes data.front(), which is undefined for an empty cloud.
+  if (feats.empty())
+    return cloud;
 
   // Iterators
   sensor_msgs::PointCloud2Iterator<float> out_x(cloud, "x");

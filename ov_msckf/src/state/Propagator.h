@@ -70,7 +70,7 @@ public:
 
     // Clean old measurements
     // std::cout << "PROP: imu_data.size() " << imu_data.size() << std::endl;
-    clean_old_imu_measurements(oldest_time - 0.10);
+    clean_old_imu_measurements_locked(oldest_time - 0.10);
   }
 
   /**
@@ -78,18 +78,19 @@ public:
    * @param oldest_time Time that we can discard measurements before (in IMU clock)
    */
   void clean_old_imu_measurements(double oldest_time) {
-    if (oldest_time < 0)
-      return;
-    auto it0 = imu_data.begin();
-    while (it0 != imu_data.end()) {
-      if (it0->timestamp < oldest_time) {
-        it0 = imu_data.erase(it0);
-      } else {
-        it0++;
-      }
-    }
+    std::lock_guard<std::mutex> lock(imu_data_mtx);
+    clean_old_imu_measurements_locked(oldest_time);
   }
 
+private:
+  void clean_old_imu_measurements_locked(double oldest_time) {
+    if (oldest_time < 0)
+      return;
+    imu_data.erase(std::remove_if(imu_data.begin(), imu_data.end(),
+                                 [oldest_time](const ov_core::ImuData &imu) { return imu.timestamp < oldest_time; }), imu_data.end());
+  }
+
+public:
   /**
    * @brief Will invalidate the cache used for fast propagation
    */
@@ -100,7 +101,7 @@ public:
    *
    * This will first collect all imu readings that occured between the
    * *current* state time and the new time we want the state to be at.
-   * If we don't have any imu readings we will try to extrapolate into the future.
+   * If IMU readings do not bracket the interval, state time and clones are left unchanged.
    * After propagating the mean and covariance using our dynamics,
    * We clone the current imu pose as a new clone in our state.
    *

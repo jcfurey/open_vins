@@ -93,7 +93,7 @@ bool VioManager::try_to_initialize(const ov_core::CameraData &message) {
 
   // Run the initialization in a second thread so it can go as slow as it desires
   thread_init_running = true;
-  std::thread thread([&] {
+  auto initialize = [this] {
     // Returns from our initializer
     double timestamp;
     Eigen::MatrixXd covariance;
@@ -175,14 +175,17 @@ bool VioManager::try_to_initialize(const ov_core::CameraData &message) {
 
     // Finally, mark that the thread has finished running
     thread_init_running = false;
-  });
+  };
 
   // If we are single threaded, then run single threaded
-  // Otherwise detach this thread so it runs in the background!
+  // Asynchronous callers retain ownership so destruction cannot race initialization.
   if (!params.use_multi_threading_subs) {
-    thread.join();
+    initialize();
+    return thread_init_success.load();
   } else {
-    thread.detach();
+    if (initialization_thread.joinable())
+      initialization_thread.join();
+    initialization_thread = std::thread(std::move(initialize));
   }
   return false;
 }

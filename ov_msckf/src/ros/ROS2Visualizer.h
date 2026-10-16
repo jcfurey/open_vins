@@ -51,6 +51,8 @@
 #include <mutex>
 #include <thread>
 
+#include "ros/Ros2MeasurementBuffer.h"
+
 #include <Eigen/Eigen>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem.hpp>
@@ -65,6 +67,7 @@ namespace ov_msckf {
 
 class VioManager;
 class Simulator;
+struct VioManagerOptions;
 
 /**
  * @brief Helper class that will publish results onto the ROS framework.
@@ -76,7 +79,7 @@ class Simulator;
  * - Our different features (SLAM, MSCKF, ARUCO)
  * - Groundtruth trajectory if we have it
  */
-class ROS2Visualizer {
+class ROS2Visualizer : public std::enable_shared_from_this<ROS2Visualizer> {
 
 public:
   /**
@@ -85,14 +88,22 @@ public:
    * @param app Core estimator manager
    * @param sim Simulator if we are simulating
    */
-  ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_ptr<VioManager> app, std::shared_ptr<Simulator> sim = nullptr);
+  ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_ptr<VioManager> app, std::shared_ptr<Simulator> sim = nullptr,
+                 std::shared_ptr<ov_core::YamlParser> parser = nullptr);
 
   /// Stop and join background work before destroying publishers and estimator state.
   ~ROS2Visualizer();
 
+  /// Quiesce estimation before final reporting and destroying publishers. Idempotent.
+  void stop();
+  bool healthy() const { return !worker_failed; }
+  Ros2MeasurementBuffer::Statistics input_statistics() const { return measurements->statistics(); }
+
   /**
    * @brief Will setup ROS subscribers and callbacks
    * @param parser Configuration file parser
+   * @note Requires shared ownership. Once started, the worker exclusively owns estimator access;
+   *       call stop() before invoking visualization or final reporting from another thread.
    */
   void setup_subscribers(std::shared_ptr<ov_core::YamlParser> parser);
 
@@ -114,16 +125,22 @@ public:
   void visualize_final();
 
   /// Callback for inertial information
-  void callback_inertial(const sensor_msgs::msg::Imu::SharedPtr msg);
+  void callback_inertial(const sensor_msgs::msg::Imu::ConstSharedPtr msg);
 
   /// Callback for monocular cameras information
-  void callback_monocular(const sensor_msgs::msg::Image::SharedPtr msg0, int cam_id0);
+  void callback_monocular(const sensor_msgs::msg::Image::ConstSharedPtr msg0, int cam_id0);
 
   /// Callback for synchronized stereo camera information
   void callback_stereo(const sensor_msgs::msg::Image::ConstSharedPtr msg0, const sensor_msgs::msg::Image::ConstSharedPtr msg1, int cam_id0,
                        int cam_id1);
 
 protected:
+  void run_estimator();
+  void reset_estimator();
+  void report_ingress(Ros2MeasurementBuffer::Result result, const char *sensor);
+  bool append_image(ov_core::CameraData &message, const sensor_msgs::msg::Image::ConstSharedPtr &image, int camera_id);
+  builtin_interfaces::msg::Time measurement_stamp() const;
+
   /// Publish the current state
   void publish_state();
 
@@ -163,11 +180,12 @@ protected:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
   std::vector<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr> subs_cam;
   typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::Image, sensor_msgs::msg::Image> sync_pol;
-  std::vector<std::shared_ptr<message_filters::Synchronizer<sync_pol>>> sync_cam;
+  // Synchronizers disconnect from their input filters during destruction, so filters must outlive them.
   std::vector<std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>> sync_subs_cam;
+  std::vector<std::shared_ptr<message_filters::Synchronizer<sync_pol>>> sync_cam;
 
   // For path viz
-  std::vector<geometry_msgs::msg::PoseStamped> poses_imu;
+  std::deque<geometry_msgs::msg::PoseStamped> poses_imu;
 
   // Groundtruth infomation
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_pathgt;
@@ -182,21 +200,18 @@ protected:
   bool start_time_set = false;
   boost::posix_time::ptime rT1, rT2;
 
-  // Thread atomics
-  std::atomic<bool> thread_update_running;
-  std::atomic<bool> stop_requested{false};
-  std::thread thread_publish;
-  std::thread thread_update;
-
-  /// Queue up camera measurements sorted by time and trigger once we have
-  /// exactly one IMU measurement with timestamp newer than the camera measurement
-  /// This also handles out-of-order camera measurements, which is rare, but
-  /// a nice feature to have for general robustness to bad camera drivers.
-  std::deque<ov_core::CameraData> camera_queue;
-  std::mutex camera_queue_mtx;
-
-  // Last camera message timestamps we have received (mapped by cam id)
-  std::map<int, double> camera_last_timestamp;
+  std::unique_ptr<Ros2MeasurementBuffer> measurements;
+  std::unique_ptr<VioManagerOptions> sensor_options;
+  std::map<int, cv::Mat> zero_masks;
+  std::map<int, cv::Size> image_sizes;
+  rclcpp::CallbackGroup::SharedPtr imu_callback_group, camera_callback_group;
+  std::thread estimator_thread;
+  std::atomic<bool> stopped{false}, worker_failed{false};
+  int imu_qos_depth = 200, camera_qos_depth = 10, path_history_size = 2000;
+  double stereo_sync_tolerance = 0.005, max_imu_history_seconds = 10.0;
+  double last_camera_time = -1.0, last_odometry_time = -1.0, odometry_publish_rate = 200.0;
+  double track_image_publish_rate = 10.0;
+  std::string global_frame = "global", imu_frame = "imu", camera_frame_prefix = "cam", truth_frame = "truth";
 
   // Last timestamp we visualized at
   double last_visualization_timestamp = 0;
@@ -206,7 +221,7 @@ protected:
   std::map<double, Eigen::Matrix<double, 17, 1>> gt_states;
 
   // For path viz
-  std::vector<geometry_msgs::msg::PoseStamped> poses_gt;
+  std::deque<geometry_msgs::msg::PoseStamped> poses_gt;
   bool publish_global2imu_tf = true;
   bool publish_calibration_tf = true;
 

@@ -718,7 +718,7 @@ void TrackKLT::perform_detection_stereo(const std::vector<cv::Mat> &img0pyr, con
   float size_y1 = (float)img1pyr.at(0).rows / (float)grid_y;
   cv::Size size_grid1(grid_x, grid_y); // width x height
   cv::Mat grid_2d_grid1 = cv::Mat::zeros(size_grid1, CV_8UC1);
-  cv::Mat mask1_updated = mask0.clone();
+  cv::Mat mask1_updated = mask1.clone();
   it0 = pts1.begin();
   it1 = ids1.begin();
   while (it0 != pts1.end()) {

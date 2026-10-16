@@ -59,8 +59,123 @@ ros2 run ov_msckf run_simulation \
 ```
 
 The parameter file supplies the simulator's required seeds, rates, and feature
-generation settings. The ROS 2 visualizer owns its background threads and
-releases image transport publishers before process exit.
+generation settings.
+
+### ROS 2 execution and sensor contracts
+
+The live ROS 2 node uses two executor threads for sensor callbacks and one owned
+estimator worker. Callbacks validate and queue measurements; initialization,
+propagation, updates, and visualization all run on that worker. Shutdown joins
+the worker before releasing estimator state or image transport publishers.
+The legacy `multi_threading_subs` and `multi_threading_pubs` settings are forced
+off in this pipeline. OpenCV can still parallelize tracking internally.
+Fast odometry publishes at most once per consumed IMU batch; its configured
+rate is a ceiling, and image processing can reduce the output rate. Every
+accepted IMU sample still feeds the estimator.
+When embedding the visualizer, stop and join the ROS executor before destroying
+it so message-filter input callbacks have finished; then stop the estimator
+worker. The installed executable performs this shutdown sequence.
+
+IMU and image subscriptions use best-effort, volatile `SensorDataQoS`, which
+also connects to reliable publishers. Camera dimensions must match the supplied
+calibration. Stereo pairs must fall within `stereo_sync_tolerance`; independent
+camera streams are ordered in the ingress queue. Frames wait until IMU samples
+cover their timestamp plus the camera-to-IMU offset. Propagation requires full
+IMU interval coverage and never extrapolates missing endpoints.
+
+The input queues and published paths are bounded. Camera overload drops the
+oldest queued frame. IMU queue overflow resets the estimator because continuing
+after silently losing inertial samples would invalidate its prediction. A
+backward IMU timestamp jump larger than one second also starts a new estimator
+epoch when `reset_on_time_jump` is enabled. Smaller stale or duplicate samples
+are rejected. An initialized estimator resets after the configured IMU history
+limit without a camera update; pre-initialization IMU history uses the
+initialization window. Resets clear published path history. Shutdown logs ingress
+counts, drops, invalid input, queue peaks, and ingress-triggered resets.
+
+Loaded YAML settings and ROS overrides are declared as read-only startup
+parameters. They can be inspected using ROS parameter services; changing them
+requires restarting the node. `use_sim_time` retains its normal ROS behavior.
+The following settings supplement the estimator configuration:
+
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| `executor_threads` | `2` | Callback executor threads, from 1 to 16 |
+| `max_imu_queue_size` | `4096` | Maximum pending inertial samples |
+| `max_camera_queue_size` | `20` | Maximum pending camera packets; a stereo pair is one packet |
+| `imu_qos_depth` / `camera_qos_depth` | `200` / `10` | DDS subscription history depths |
+| `stereo_sync_tolerance` | `0.005` | Maximum stereo timestamp difference, seconds |
+| `path_history_size` | `2000` | Maximum poses per published path; zero disables history |
+| `odometry_publish_rate` | `200.0` | Maximum fast odometry/TF rate, Hz; zero disables it |
+| `track_image_publish_rate` | `10.0` | Maximum diagnostic tracking image rate, Hz; zero disables it |
+| `max_imu_history_seconds` | `10.0` | Initialized estimator history limit without camera updates |
+| `reset_on_time_jump` | `true` | Reset on large backward IMU timestamp jumps |
+| `topic_imu`, `topic_camera0`, `topic_camera1`, ... | Calibration topics | Explicit sensor topic aliases |
+| `global_frame_id` / `imu_frame_id` | `global` / `imu` | Pose parent and odometry child frames |
+| `camera_frame_prefix` / `truth_frame_id` | `cam` / `truth` | Camera TF prefix and ground-truth child frame |
+
+Pose, odometry, TF, image, and feature headers use measurement time. Tracking
+images retain camera acquisition time, including before initialization; state
+outputs use the IMU clock. Pose
+orientation covariance is expressed about fixed axes in the parent frame;
+odometry twist is expressed in its child frame, with covariance including
+orientation, velocity, and bias uncertainty. Path and cloud construction is
+skipped without subscribers, and tracking visualization stays on the estimator
+worker. The existing `loop_feats` interface retains its legacy `PointCloud`
+message type for downstream compatibility; ordinary feature clouds use
+`PointCloud2`.
+
+### Regression checks
+
+Build with `-DBUILD_TESTING=ON`, then run from the workspace root:
+
+```bash
+colcon test --base-paths src/open_vins --packages-select ov_core ov_msckf
+colcon test-result --test-result-base build/ov_core --verbose
+colcon test-result --test-result-base build/ov_msckf --verbose
+ROS_DOMAIN_ID=126 python3 src/open_vins/ov_msckf/test/ros2_runtime_smoke.py \
+  --executable install/ov_msckf/lib/ov_msckf/run_subscribe_msckf \
+  --config src/open_vins/config/euroc_mav/estimator_config.yaml \
+  --output .colcon/open-vins-runtime-smoke
+```
+
+The C++ tests cover stereo exclusion masks, IMU interval interpolation, missing
+coverage, nonzero clock offsets, covariance frame conversion, invalid EKF
+innovations, empty and populated PointCloud2 serialization, queue limits,
+ordering, concurrent producers/consumers, and shutdown.
+The runtime check exercises best-effort sensor publishers, topic aliases,
+read-only parameters, camera overload, invalid IMU input, bag rewinds, and SIGINT.
+`ov_msckf/test/ros2_euroc_output_smoke.py` additionally observes a live EuRoC
+replay; its module docstring lists the required frame and path overrides. It
+checks timestamps, frame IDs, finite covariances, path bounds, tracking image
+rate, depth/color image storage, and CameraInfo calibration fields.
+
+For memory checks, build a separate instrumented overlay and run the runtime
+test with leak checking enabled:
+
+```bash
+colcon build --base-paths src/open_vins --packages-up-to ov_msckf \
+  --build-base .colcon/open-vins-asan/build \
+  --install-base .colcon/open-vins-asan/install --executor sequential \
+  --cmake-args -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+  '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+  '-DCMAKE_CXX_FLAGS_DEBUG=-O1 -g1 -fno-omit-frame-pointer'
+source .colcon/open-vins-asan/install/setup.bash
+ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 ROS_DOMAIN_ID=126 \
+  python3 src/open_vins/ov_msckf/test/ros2_runtime_smoke.py \
+    --executable .colcon/open-vins-asan/install/ov_msckf/lib/ov_msckf/run_subscribe_msckf \
+    --config src/open_vins/config/euroc_mav/estimator_config.yaml \
+    --output .colcon/open-vins-asan/runtime --raw-only
+```
+
+On the verified Lyrical host, loading all installed image transports leaves a
+157-byte ROS type-support allocation at exit, also reproduced with a standalone
+`image_transport` publisher without OpenVINS. `--raw-only` isolates strict leak
+checks from that external allocation; it does not disable leak detection.
+Production transport selection remains configurable through standard ROS
+parameters such as `trackhist.enable_pub_plugins:=[image_transport/raw]`, with
+equivalent settings for `loop_depth` and `loop_depth_colored`.
 
 Verified on 2026-10-16 with Ubuntu 26.04.1, ROS 2 Lyrical, CMake 4.2.3,
 GCC 15.2, Boost 1.90, Ceres 2.2, and OpenCV 4.10. All five packages build,
@@ -69,6 +184,22 @@ launch accepts test images and IMU samples and exits cleanly on SIGINT. The
 bundled UDel Gore simulation completes with 1,697 finite saved states over
 169.6 seconds of trajectory, with position RMSE 0.068 m and orientation RMSE
 0.201 degrees.
+
+The ROS 2 hardening pass additionally passes 24 C++ regression tests, the ROS
+runtime/parameter/shutdown checks, and 11 standalone queue tests under
+ThreadSanitizer. ASan/UBSan/LeakSanitizer pass the C++ suite and a sensor replay
+with raw image transports. Instrumented playback exercises bounded camera
+overload, rather than serving as a throughput benchmark.
+
+A native headless replay of the first 90 seconds of EuRoC `MH_01_easy` at 2x
+accepts 17,830 IMU samples and 1,783 stereo packets without ingress drops or
+resets. It saves 886 finite states spanning 44.25 seconds after initialization,
+with position RMSE 0.073 m against interpolated ground truth after rigid SE(3)
+alignment without scale. Peak RSS is about 116 MiB, compared with 323 MiB in the
+original replay. The original run reported heap corruption at shutdown, so its
+trajectory is not a trustworthy accuracy baseline. Normal-speed playback with
+output subscribers also verifies acquisition timestamps, frame IDs, bounded
+paths, depth image layout, and CameraInfo fields without ingress drops.
 
 ## News / Events
 

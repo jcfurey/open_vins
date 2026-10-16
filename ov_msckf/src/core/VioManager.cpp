@@ -110,9 +110,12 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
     }
     // Create the directory that we will open the file in
     boost::filesystem::path p(params.record_timing_filepath);
-    boost::filesystem::create_directories(p.parent_path());
+    if (!p.parent_path().empty())
+      boost::filesystem::create_directories(p.parent_path());
     // Open our statistics file!
     of_statistics.open(params.record_timing_filepath, std::ofstream::out | std::ofstream::app);
+    if (!of_statistics)
+      throw std::runtime_error("Unable to open estimator timing output");
     // Write the header information into it
     of_statistics << "# timestamp (sec),tracking,propagation,msckf update,";
     if (state->_options.max_slam_features > 0) {
@@ -163,7 +166,19 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
   }
 }
 
+VioManager::~VioManager() {
+  if (initialization_thread.joinable())
+    initialization_thread.join();
+}
+
 void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
+
+  if (!std::isfinite(message.timestamp) || message.timestamp < 0 || message.timestamp <= last_imu_timestamp || !message.wm.allFinite() ||
+      !message.am.allFinite()) {
+    PRINT_WARNING(YELLOW "Rejected invalid or non-increasing IMU timestamp\n" RESET);
+    return;
+  }
+  last_imu_timestamp = message.timestamp;
 
   // The oldest time we need IMU with is the last clone
   // We shouldn't really need the whole window, but if we go backwards in time we will

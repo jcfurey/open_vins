@@ -156,11 +156,17 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
   S.triangularView<Eigen::Upper>() += R;
   // Eigen::MatrixXd S = H * P_small * H.transpose() + R;
 
-  // Invert our S (should we use a more stable method here??)
-  Eigen::MatrixXd Sinv = Eigen::MatrixXd::Identity(R.rows(), R.rows());
-  S.selfadjointView<Eigen::Upper>().llt().solveInPlace(Sinv);
-  Eigen::MatrixXd K = M_a * Sinv.selfadjointView<Eigen::Upper>();
-  // Eigen::MatrixXd K = M_a * S.inverse();
+  // Solve for the gain directly, without constructing an innovation covariance inverse.
+  Eigen::LLT<Eigen::MatrixXd> innovation(S.selfadjointView<Eigen::Upper>());
+  if (innovation.info() != Eigen::Success || !res.allFinite()) {
+    PRINT_WARNING(YELLOW "EKF update rejected: invalid innovation covariance or residual\n" RESET);
+    return;
+  }
+  Eigen::MatrixXd K = innovation.solve(M_a.transpose()).transpose();
+  if (!K.allFinite()) {
+    PRINT_WARNING(YELLOW "EKF update rejected: nonfinite Kalman gain\n" RESET);
+    return;
+  }
 
   // Update Covariance
   state->_Cov.triangularView<Eigen::Upper>() -= K * M_a.transpose();
