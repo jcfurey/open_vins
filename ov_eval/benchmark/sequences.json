@@ -1,0 +1,276 @@
+{
+  "sim_udel_gore": {
+    "format": "sim",
+    "config": "config/rpng_sim/estimator_config.yaml",
+    "trajectory": "ov_data/sim/udel_gore.txt",
+    "align": "none",
+    "segments": [
+      8,
+      16,
+      24,
+      32,
+      40
+    ]
+  },
+  "tum_vi_room1": {
+    "format": "asl",
+    "url": "https://cdn2.vision.in.tum.de/tumvi/exported/euroc/512_16/dataset-room1_512_16.tar",
+    "sha256": "20354392eab5cc82c9770ed29cf0130c5acce0db54a257571499008fb34c398f",
+    "folder": "dataset-room1_512_16",
+    "config": "config/tum_vi/estimator_config.yaml",
+    "groundtruth": "ov_data/tum_vi/dataset-room1_512_16.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "tum_vi_room2": {
+    "format": "asl",
+    "url": "https://cdn2.vision.in.tum.de/tumvi/exported/euroc/512_16/dataset-room2_512_16.tar",
+    "sha256": "70343c5bbd9d674d0a2790bf934ee7d9cc08c1dea7cd77747a5557e4c94973f6",
+    "folder": "dataset-room2_512_16",
+    "config": "config/tum_vi/estimator_config.yaml",
+    "groundtruth": "ov_data/tum_vi/dataset-room2_512_16.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "tum_vi_room3": {
+    "format": "asl",
+    "url": "https://cdn2.vision.in.tum.de/tumvi/exported/euroc/512_16/dataset-room3_512_16.tar",
+    "sha256": "66ff297e6600e882277d21e21af5ec9fb33864ec0b759dcc0b629cf551a3c824",
+    "folder": "dataset-room3_512_16",
+    "config": "config/tum_vi/estimator_config.yaml",
+    "groundtruth": "ov_data/tum_vi/dataset-room3_512_16.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "tum_vi_room4": {
+    "format": "asl",
+    "url": "https://cdn2.vision.in.tum.de/tumvi/exported/euroc/512_16/dataset-room4_512_16.tar",
+    "sha256": "2c3633407693988cf24faef5f874cba08bbc3c2d2ec1168c86b6da55ae9f2e68",
+    "folder": "dataset-room4_512_16",
+    "config": "config/tum_vi/estimator_config.yaml",
+    "groundtruth": "ov_data/tum_vi/dataset-room4_512_16.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "tum_vi_room5": {
+    "format": "asl",
+    "url": "https://cdn2.vision.in.tum.de/tumvi/exported/euroc/512_16/dataset-room5_512_16.tar",
+    "sha256": "be6129b096dc88a7da0a552f1fc74c3309fffaa88bf4528a779e3ecc60a65519",
+    "folder": "dataset-room5_512_16",
+    "config": "config/tum_vi/estimator_config.yaml",
+    "groundtruth": "ov_data/tum_vi/dataset-room5_512_16.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "euroc_v1_01_easy": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "V1_01_easy",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/V1_01_easy.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "euroc_v1_02_medium": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "V1_02_medium",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/V1_02_medium.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "euroc_v1_03_difficult": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "V1_03_difficult",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/V1_03_difficult.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "euroc_v2_01_easy": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "V2_01_easy",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/V2_01_easy.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "euroc_v2_02_medium": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "V2_02_medium",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/V2_02_medium.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "euroc_v2_03_difficult": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "V2_03_difficult",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/V2_03_difficult.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ]
+  },
+  "euroc_mh_01_easy": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "MH_01_easy",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/MH_01_easy.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ],
+    "start": 40
+  },
+  "euroc_mh_02_easy": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "MH_02_easy",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/MH_02_easy.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ],
+    "start": 35
+  },
+  "euroc_mh_03_medium": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "MH_03_medium",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/MH_03_medium.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ],
+    "start": 5
+  },
+  "euroc_mh_04_difficult": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "MH_04_difficult",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/MH_04_difficult.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ],
+    "start": 10
+  },
+  "euroc_mh_05_difficult": {
+    "format": "asl",
+    "url": null,
+    "sha256": null,
+    "folder": "MH_05_difficult",
+    "config": "config/euroc_mav/estimator_config.yaml",
+    "groundtruth": "ov_data/euroc_mav/MH_05_difficult.txt",
+    "align": "posyaw",
+    "segments": [
+      7,
+      14,
+      21,
+      28,
+      35
+    ],
+    "start": 5
+  }
+}

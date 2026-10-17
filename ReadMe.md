@@ -231,6 +231,49 @@ trajectory is not a trustworthy accuracy baseline. Normal-speed playback with
 output subscribers also verifies acquisition timestamps, frame IDs, bounded
 paths, depth image layout, and CameraInfo fields without ingress drops.
 
+### Deterministic replay and benchmarks
+
+Live playback through DDS is timing dependent, so accuracy comparisons use the
+serial runners. Both feed the estimator in timestamp order on one thread,
+release each frame once IMU covers it (the live worker's rule), and never drop
+input. A fixed input therefore always produces the same trajectory, and the
+summary records a digest of every written value to prove it.
+
+```bash
+# ASL/EuRoC folders (EuRoC MAV, TUM-VI exports); also built without ROS
+ros2 run ov_msckf asl_serial_msckf config/tum_vi/estimator_config.yaml \
+  ~/datasets/tum_vi/dataset-room1_512_16 /tmp/room1 --verbosity WARNING
+
+# ROS 2 bags (sqlite3 or mcap, raw or compressed images)
+ros2 run ov_msckf ros2_serial_msckf config/tum_vi/estimator_config.yaml --ros-args \
+  -p path_bag:=$HOME/bags/room1 -p output_dir:=/tmp/room1_bag
+```
+
+Each run writes `trajectory.txt` (ov_eval format with local orientation and
+position covariances, IMU clock), `timing.csv`, and `summary.json` (counts,
+per-frame timing, peak memory, digest). `ov_msckf/scripts/asl_to_ros2bag.py`
+converts an ASL folder into a bag that replays to the identical digest.
+`error_singlerun <align> <gt> <est> --json eval.json` writes ATE, RPE, NEES and
+association coverage.
+
+`ov_eval/benchmark/benchmark.py` wraps this into a reproducible protocol over
+the sequences in `sequences.json` (TUM-VI rooms are downloadable; EuRoC must be
+placed manually, its public host being rate limited):
+
+```bash
+python3 ov_eval/benchmark/benchmark.py fetch --data ~/datasets --only tum_vi_room1
+python3 ov_eval/benchmark/benchmark.py run --data ~/datasets --results /tmp/bench --repeat 2
+python3 ov_eval/benchmark/benchmark.py check --results /tmp/bench \
+  --baseline ov_eval/benchmark/baselines/reference.json
+```
+
+`run` repeats every sequence and reports whether the trajectories are
+bit-identical; `check` fails on ATE more than 10% (or 5 mm / 0.1 deg) above the
+baseline, RPE more than 15% above it, lost coverage, or nondeterminism.
+`--strict` also requires the baseline's digests, which only holds for the same
+binaries and libraries. The `sim_udel_gore` entry needs no download: the
+simulator writes its own ground truth, and CI gates on it.
+
 ## News / Events
 
 * **May 11, 2023** - Inertial intrinsic support released as part of v2.7 along with a few bug fixes and improvements to stereo KLT tracking. Please check out the [release page](https://github.com/rpng/open_vins/releases/tag/v2.7) for details.

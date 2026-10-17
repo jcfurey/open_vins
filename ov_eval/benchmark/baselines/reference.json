@@ -1,0 +1,272 @@
+{
+  "environment": {
+    "machine": "x86_64",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+    "cores": 4,
+    "system": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39",
+    "ros_distro": "jazzy",
+    "commit": "d7fb50d7e474a5eea2c48d52d81642c135c4832d",
+    "dirty": false,
+    "date": "2026-10-17T00:59:06+0000"
+  },
+  "sequences": {
+    "sim_udel_gore": {
+      "metrics": {
+        "ate_pos_m": 0.05091952019,
+        "ate_ori_deg": 0.1931052276,
+        "rpe": {
+          "8": {
+            "pos_m": 0.02460604905,
+            "ori_deg": 0.07897186321,
+            "samples": 1610
+          },
+          "16": {
+            "pos_m": 0.03982328356,
+            "ori_deg": 0.1072348132,
+            "samples": 1562
+          },
+          "24": {
+            "pos_m": 0.04815980683,
+            "ori_deg": 0.1153839247,
+            "samples": 1514
+          },
+          "32": {
+            "pos_m": 0.05995582012,
+            "ori_deg": 0.13872878,
+            "samples": 1467
+          },
+          "40": {
+            "pos_m": 0.06149563841,
+            "ori_deg": 0.1484163445,
+            "samples": 1419
+          }
+        },
+        "matched_poses": 1698,
+        "matched_duration_s": 169.698926,
+        "nees_ori": 0.8683295476,
+        "nees_pos": 0.6698826771,
+        "frames_processed": 1702,
+        "frame_ms_mean": 25.733445785546323,
+        "frame_ms_p95": 33.857618,
+        "peak_rss_mib": 103,
+        "digest": "d713ffd2b03521dc",
+        "wall_s": 48.21531470199989
+      }
+    },
+    "tum_vi_room1": {
+      "metrics": {
+        "ate_pos_m": 0.05978302823,
+        "ate_ori_deg": 1.573699833,
+        "rpe": {
+          "7": {
+            "pos_m": 0.02073988248,
+            "ori_deg": 0.5898161878,
+            "samples": 2480
+          },
+          "14": {
+            "pos_m": 0.02885646798,
+            "ori_deg": 0.8224969064,
+            "samples": 2339
+          },
+          "21": {
+            "pos_m": 0.03919388428,
+            "ori_deg": 1.060355944,
+            "samples": 2226
+          },
+          "28": {
+            "pos_m": 0.05081947124,
+            "ori_deg": 1.284477099,
+            "samples": 2081
+          },
+          "35": {
+            "pos_m": 0.05775502805,
+            "ori_deg": 1.469467317,
+            "samples": 1975
+          }
+        },
+        "matched_poses": 2642,
+        "matched_duration_s": 134.4542155,
+        "nees_ori": 352.71765,
+        "nees_pos": 1.2218703,
+        "frames_processed": 2821,
+        "frame_ms_mean": 14.439351299893625,
+        "frame_ms_p95": 21.892097999999997,
+        "peak_rss_mib": 97.1171875,
+        "digest": "d26806cdcf04952c",
+        "wall_s": 41.786567543000274
+      }
+    },
+    "tum_vi_room2": {
+      "metrics": {
+        "ate_pos_m": 0.07922701688,
+        "ate_ori_deg": 2.743363979,
+        "rpe": {
+          "7": {
+            "pos_m": 0.0239759954,
+            "ori_deg": 0.6592004751,
+            "samples": 2269
+          },
+          "14": {
+            "pos_m": 0.03637734904,
+            "ori_deg": 1.05895951,
+            "samples": 2138
+          },
+          "21": {
+            "pos_m": 0.04612307798,
+            "ori_deg": 1.464102194,
+            "samples": 1999
+          },
+          "28": {
+            "pos_m": 0.05176357867,
+            "ori_deg": 1.804077194,
+            "samples": 1922
+          },
+          "35": {
+            "pos_m": 0.06341685241,
+            "ori_deg": 2.38721883,
+            "samples": 1793
+          }
+        },
+        "matched_poses": 2504,
+        "matched_duration_s": 138.9037716,
+        "nees_ori": 685.1443288,
+        "nees_pos": 2.128037632,
+        "frames_processed": 2882,
+        "frame_ms_mean": 13.734555343164468,
+        "frame_ms_p95": 20.452086,
+        "peak_rss_mib": 97.77734375,
+        "digest": "23c4f4467391dc8f",
+        "wall_s": 40.5697138609994
+      }
+    },
+    "tum_vi_room3": {
+      "metrics": {
+        "ate_pos_m": 0.08063630477,
+        "ate_ori_deg": 1.266633766,
+        "rpe": {
+          "7": {
+            "pos_m": 0.02601097493,
+            "ori_deg": 0.6842870814,
+            "samples": 2114
+          },
+          "14": {
+            "pos_m": 0.0372208076,
+            "ori_deg": 0.945922371,
+            "samples": 1990
+          },
+          "21": {
+            "pos_m": 0.0467795161,
+            "ori_deg": 1.142616218,
+            "samples": 1909
+          },
+          "28": {
+            "pos_m": 0.05653128472,
+            "ori_deg": 1.384693723,
+            "samples": 1741
+          },
+          "35": {
+            "pos_m": 0.06185419912,
+            "ori_deg": 1.711806428,
+            "samples": 1682
+          }
+        },
+        "matched_poses": 2502,
+        "matched_duration_s": 136.9524574,
+        "nees_ori": 771.140251,
+        "nees_pos": 2.250131969,
+        "frames_processed": 2821,
+        "frame_ms_mean": 14.492276003899383,
+        "frame_ms_p95": 21.929009,
+        "peak_rss_mib": 98.03515625,
+        "digest": "3e5e1058205fd2e4",
+        "wall_s": 41.71527569199952
+      }
+    },
+    "tum_vi_room4": {
+      "metrics": {
+        "ate_pos_m": 0.02843740873,
+        "ate_ori_deg": 0.8393412978,
+        "rpe": {
+          "7": {
+            "pos_m": 0.02419996869,
+            "ori_deg": 0.6902443449,
+            "samples": 1864
+          },
+          "14": {
+            "pos_m": 0.03192550786,
+            "ori_deg": 0.9512776617,
+            "samples": 1735
+          },
+          "21": {
+            "pos_m": 0.03647370951,
+            "ori_deg": 1.069836831,
+            "samples": 1483
+          },
+          "28": {
+            "pos_m": 0.03829920988,
+            "ori_deg": 1.14951285,
+            "samples": 1244
+          },
+          "35": {
+            "pos_m": 0.0437012737,
+            "ori_deg": 0.7333615662,
+            "samples": 1006
+          }
+        },
+        "matched_poses": 2108,
+        "matched_duration_s": 106.9044909,
+        "nees_ori": 406.3780413,
+        "nees_pos": 0.3035867896,
+        "frames_processed": 2227,
+        "frame_ms_mean": 15.756846604400545,
+        "frame_ms_p95": 22.93839,
+        "peak_rss_mib": 96.98828125,
+        "digest": "ef69e11437f91b2a",
+        "wall_s": 35.96350940699995
+      }
+    },
+    "tum_vi_room5": {
+      "metrics": {
+        "ate_pos_m": 0.09116251791,
+        "ate_ori_deg": 1.537482017,
+        "rpe": {
+          "7": {
+            "pos_m": 0.02871821048,
+            "ori_deg": 0.6155313046,
+            "samples": 2478
+          },
+          "14": {
+            "pos_m": 0.03881480261,
+            "ori_deg": 0.6321927768,
+            "samples": 2349
+          },
+          "21": {
+            "pos_m": 0.05329378326,
+            "ori_deg": 0.7617930081,
+            "samples": 2196
+          },
+          "28": {
+            "pos_m": 0.06789138307,
+            "ori_deg": 0.8002945618,
+            "samples": 2087
+          },
+          "35": {
+            "pos_m": 0.08215741719,
+            "ori_deg": 0.9880129036,
+            "samples": 2003
+          }
+        },
+        "matched_poses": 2751,
+        "matched_duration_s": 137.8540545,
+        "nees_ori": 431.7861792,
+        "nees_pos": 3.141754873,
+        "frames_processed": 2846,
+        "frame_ms_mean": 14.706933421293051,
+        "frame_ms_p95": 22.449073,
+        "peak_rss_mib": 98.48828125,
+        "digest": "b3ba14ba6aeb2388",
+        "wall_s": 42.70572099400033
+      }
+    }
+  }
+}
