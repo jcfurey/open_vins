@@ -141,6 +141,7 @@ int main(int argc, char **argv) {
       require_topic(camera.first, {"sensor_msgs/msg/Image", "sensor_msgs/msg/CompressedImage"});
 
     auto app = std::make_shared<VioManager>(params);
+    app->set_active_image_enabled(visualize); // only the loop-closure outputs use it
     std::shared_ptr<ROS2Visualizer> viz;
     if (visualize)
       viz = std::make_shared<ROS2Visualizer>(node, app, nullptr, parser);

@@ -121,6 +121,7 @@ int main(int argc, char **argv) {
 
     const auto masks = replay_masks(params);
     auto app = std::make_shared<VioManager>(params);
+    app->set_active_image_enabled(false); // only loop-closure outputs draw it, and nothing is published here
     TrajectoryWriter trajectory((boost::filesystem::path(args.output) / "trajectory.txt").string());
     std::ofstream timing((boost::filesystem::path(args.output) / "timing.csv").string(), std::ofstream::trunc);
     if (!timing)

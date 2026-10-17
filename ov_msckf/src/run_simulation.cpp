@@ -125,6 +125,8 @@ int main(int argc, char **argv) {
     auto viz = std::make_shared<ROS1Visualizer>(nh, sys, sim);
 #elif ROS_AVAILABLE == 2
     auto viz = std::make_shared<ROS2Visualizer>(node, sys, sim, parser);
+#else
+    sys->set_active_image_enabled(false); // only the loop-closure outputs use it
 #endif
 
     // Ensure we read in all parameters required
