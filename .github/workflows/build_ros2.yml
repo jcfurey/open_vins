@@ -4,69 +4,44 @@ on:
   push:
     branches: [ master ]
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  build_1804:
-    name: "ROS2 Ubuntu 18.04"
+  build:
+    name: "ROS 2 ${{ matrix.distro }}"
     runs-on: ubuntu-latest
+    container: ros:${{ matrix.distro }}-ros-base
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ jazzy, kilted, lyrical ]
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Code Checkout
-        uses: actions/checkout@v2
-      - name: Create Workspace and Docker Image
+        uses: actions/checkout@v4
+        with:
+          path: src/open_vins
+      - name: Install Dependencies
         run: |
-          export REPO=$(basename $GITHUB_REPOSITORY) &&
-          cd $GITHUB_WORKSPACE/.. && mkdir src/ &&
-          mv $REPO/ src/ && mkdir $REPO/ && mv src/ $REPO/ && cd $REPO/ &&
-          docker build -t openvins -f $GITHUB_WORKSPACE/src/$REPO/Dockerfile_ros2_18_04 .
-      - name: Echo Enviroment
+          apt-get update
+          rosdep update --rosdistro ${{ matrix.distro }}
+          rosdep install --from-paths src --ignore-src --rosdistro ${{ matrix.distro }} -y
+      - name: Build
         run: |
-          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "echo $ROS_DISTRO && echo $ROS_VERSION"
-      - name: Run Build in Docker
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          MAKEFLAGS=-j2 colcon build --event-handlers console_cohesion+ \
+            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DDISABLE_MATPLOTLIB=ON
+      - name: Unit Tests
         run: |
-          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && colcon build"
-      # THIS SEEMS TO FAIL WITH 245 ERROR, NOT SURE WHY!!!!!
-      #- name: Run OpenVINS Simulation!
-      #  run: |
-      #    docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins/config/rpng_sim/estimator_config.yaml"
-  build_2004:
-    name: "ROS2 Ubuntu 20.04"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Code Checkout
-        uses: actions/checkout@v2
-      - name: Create Workspace and Docker Image
+          source install/setup.bash
+          colcon test --packages-select ov_core ov_init ov_msckf --event-handlers console_cohesion+
+          colcon test-result --verbose
+      - name: Simulation Accuracy
         run: |
-          export REPO=$(basename $GITHUB_REPOSITORY) &&
-          cd $GITHUB_WORKSPACE/.. && mkdir src/ &&
-          mv $REPO/ src/ && mkdir $REPO/ && mv src/ $REPO/ && cd $REPO/ &&
-          docker build -t openvins -f $GITHUB_WORKSPACE/src/$REPO/Dockerfile_ros2_20_04 .
-      - name: Echo Enviroment
-        run: |
-          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "echo $ROS_DISTRO && echo $ROS_VERSION"
-      - name: Run Build in Docker
-        run: |
-          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && colcon build"
-      - name: Run OpenVINS Simulation!
-        run: |
-          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins/config/rpng_sim/estimator_config.yaml"
-  build_2204:
-    name: "ROS2 Ubuntu 22.04"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Code Checkout
-        uses: actions/checkout@v2
-      - name: Create Workspace and Docker Image
-        run: |
-          export REPO=$(basename $GITHUB_REPOSITORY) &&
-          cd $GITHUB_WORKSPACE/.. && mkdir src/ &&
-          mv $REPO/ src/ && mkdir $REPO/ && mv src/ $REPO/ && cd $REPO/ &&
-          docker build -t openvins -f $GITHUB_WORKSPACE/src/$REPO/Dockerfile_ros2_22_04 .
-      - name: Echo Enviroment
-        run: |
-          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "echo $ROS_DISTRO && echo $ROS_VERSION"
-      - name: Run Build in Docker
-        run: |
-          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && colcon build"
-#      - name: Run OpenVINS Simulation!
-#        run: |
-#          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins/config/rpng_sim/estimator_config.yaml"
+          source install/setup.bash
+          python3 src/open_vins/ov_eval/benchmark/benchmark.py run --data . --results sim --only sim_udel_gore --repeat 2
+          python3 src/open_vins/ov_eval/benchmark/benchmark.py check --results sim \
+            --baseline src/open_vins/ov_eval/benchmark/baselines/reference.json \
+            --only sim_udel_gore --ate-tolerance 0.25 --rpe-tolerance 0.3

@@ -4,34 +4,28 @@ on:
   push:
     branches: [ master ]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
-    name: "Ubuntu Latest"
-    runs-on: ubuntu-latest
+    name: "Ubuntu 24.04 without ROS"
+    runs-on: ubuntu-24.04
     steps:
       - name: Code Checkout
-        uses: actions/checkout@v2
-      - name: Installing Ceres Solver
+        uses: actions/checkout@v4
+      - name: Install Dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt install -y libunwind-dev
-          sudo apt-get install -y cmake libgoogle-glog-dev libgflags-dev libatlas-base-dev libeigen3-dev libsuitesparse-dev libceres-dev
-#          cd ..
-#          git clone https://ceres-solver.googlesource.com/ceres-solver
-#          cd ceres-solver
-#          git checkout tags/2.0.0
-#          mkdir build
-#          cd build
-#          cmake ..
-#          sudo make install
-#          cd ../../
-      - name: Configure and Build
+          sudo apt-get update
+          sudo apt-get install -y cmake libeigen3-dev libopencv-dev libopencv-contrib-dev libboost-all-dev libceres-dev
+      - name: Build
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y libeigen3-dev libopencv-dev libboost-all-dev
-          mkdir build
-          cd build
-          cmake ../ov_msckf/
-          make
-
+          cmake -S ov_msckf -B build/ov_msckf -DCMAKE_BUILD_TYPE=Release -DENABLE_ROS=OFF
+          cmake --build build/ov_msckf -j2
+          cmake -S ov_eval -B build/ov_eval -DCMAKE_BUILD_TYPE=Release -DENABLE_ROS=OFF -DDISABLE_MATPLOTLIB=ON
+          cmake --build build/ov_eval -j2
+      - name: Simulation Accuracy
+        run: |
+          python3 ov_eval/benchmark/benchmark.py run --data . --results sim --only sim_udel_gore --repeat 2 \
+            --sim-runner build/ov_msckf/run_simulation --evaluator build/ov_eval/error_singlerun
+          python3 ov_eval/benchmark/benchmark.py check --results sim --baseline ov_eval/benchmark/baselines/reference.json \
+            --only sim_udel_gore --ate-tolerance 0.25 --rpe-tolerance 0.3

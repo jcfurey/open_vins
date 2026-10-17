@@ -264,7 +264,7 @@ def check(args):
     with open(baseline_path) as handle:
         baseline = json.load(handle)
     failures = []
-    for name, reference in baseline["sequences"].items():
+    for name, reference in select(baseline["sequences"], args.only).items():
         entry = results["sequences"].get(name)
         if entry is None or "metrics" not in entry:
             print(f"[{name}] MISSING from results")
@@ -322,6 +322,7 @@ def main():
     check_parser = commands.add_parser("check", help="compare results with a baseline")
     check_parser.add_argument("--results", required=True)
     check_parser.add_argument("--baseline", required=True)
+    check_parser.add_argument("--only", nargs="*", help="baseline sequences to check (default: all)")
     check_parser.add_argument("--ate-tolerance", type=float, default=0.10, help="allowed relative ATE increase")
     check_parser.add_argument("--rpe-tolerance", type=float, default=0.15, help="allowed relative RPE increase")
     check_parser.add_argument("--strict", action="store_true", help="also require identical trajectory digests")
