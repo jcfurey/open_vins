@@ -31,11 +31,11 @@ endif ()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Enable compile optimizations
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fsee -fomit-frame-pointer -fno-signed-zeros -fno-math-errno -funroll-loops")
-
-# Enable debug flags (use if you want to debug in gdb)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -Wall -Wuninitialized -fno-omit-frame-pointer")
+# Default to an optimized build; a requested build type (e.g. Debug) keeps its own optimization and debug flags
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif ()
+add_compile_options(-fno-signed-zeros -fno-math-errno -funroll-loops -Wall -Wuninitialized -fno-omit-frame-pointer)
 
 # Find our ROS version!
 # NOTE: Default to using the ROS1 package if both are in our enviroment
