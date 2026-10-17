@@ -24,6 +24,7 @@
 
 #include "core/VioManager.h"
 #include "ros/ROSVisualizerHelper.h"
+#include "ros/Ros2Compat.h"
 #include "ros/Ros2Covariance.h"
 #include "sim/Simulator.h"
 #include "state/Propagator.h"
@@ -43,6 +44,12 @@ double sensor_time(const builtin_interfaces::msg::Time &stamp) {
   if (stamp.sec < 0 || stamp.nanosec >= 1000000000U)
     return std::numeric_limits<double>::quiet_NaN();
   return static_cast<double>(stamp.sec) + static_cast<double>(stamp.nanosec) * 1e-9;
+}
+
+void forward_stereo(const std::weak_ptr<ROS2Visualizer> &visualizer, const sensor_msgs::msg::Image::ConstSharedPtr &left,
+                    const sensor_msgs::msg::Image::ConstSharedPtr &right) {
+  if (const auto self = visualizer.lock())
+    self->callback_stereo(left, right, 0, 1);
 }
 } // namespace
 
@@ -134,7 +141,7 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_p
   PRINT_DEBUG("Publishing: %s\n", pub_points_sim->get_topic_name());
 
   // Our tracking image
-  it_pub_tracks = image_transport::create_publisher(*node, "trackhist", rclcpp::QoS(2));
+  it_pub_tracks = create_image_publisher(*node, "trackhist", rclcpp::QoS(2));
   PRINT_DEBUG("Publishing: %s\n", it_pub_tracks.getTopic().c_str());
 
   // Groundtruth publishers
@@ -148,8 +155,8 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_p
   pub_loop_point = node->create_publisher<sensor_msgs::msg::PointCloud>("loop_feats", 2);
   pub_loop_extrinsic = node->create_publisher<nav_msgs::msg::Odometry>("loop_extrinsic", 2);
   pub_loop_intrinsics = node->create_publisher<sensor_msgs::msg::CameraInfo>("loop_intrinsics", 2);
-  it_pub_loop_img_depth = image_transport::create_publisher(*node, "loop_depth", rclcpp::QoS(2));
-  it_pub_loop_img_depth_color = image_transport::create_publisher(*node, "loop_depth_colored", rclcpp::QoS(2));
+  it_pub_loop_img_depth = create_image_publisher(*node, "loop_depth", rclcpp::QoS(2));
+  it_pub_loop_img_depth_color = create_image_publisher(*node, "loop_depth_colored", rclcpp::QoS(2));
 
   publish_global2imu_tf = boolean("publish_global_to_imu_tf", true);
   publish_calibration_tf = boolean("publish_calibration_tf", true);
@@ -317,19 +324,14 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<YamlParser> parser) {
   if (!parser->successful())
     throw std::invalid_argument("Camera/IMU topics could not be loaded");
   if (sensor_options->state_options.num_cameras == 2) {
-    auto left = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(_node, camera_topics[0], camera_qos,
-                                                                                       camera_subscription_options);
-    auto right = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(_node, camera_topics[1], camera_qos,
-                                                                                        camera_subscription_options);
+    using ImageFilter = message_filters::Subscriber<sensor_msgs::msg::Image>;
+    auto left = create_filter_subscriber<ImageFilter>(_node, camera_topics[0], camera_qos, camera_subscription_options);
+    auto right = create_filter_subscriber<ImageFilter>(_node, camera_topics[1], camera_qos, camera_subscription_options);
     sync_pol policy(camera_qos_depth);
     policy.setMaxIntervalDuration(rclcpp::Duration::from_seconds(stereo_sync_tolerance));
     auto sync = std::make_shared<message_filters::Synchronizer<sync_pol>>(std::move(policy), *left, *right);
-    std::function<void(const sensor_msgs::msg::Image::ConstSharedPtr &, const sensor_msgs::msg::Image::ConstSharedPtr &)> callback =
-        [weak_self](const auto &left_image, const auto &right_image) {
-          if (const auto self = weak_self.lock())
-            self->callback_stereo(left_image, right_image, 0, 1);
-        };
-    sync->registerCallback(callback);
+    // A bind expression accepts both the exact image pair (Lyrical) and Jazzy's trailing null-message arguments.
+    sync->registerCallback(std::bind(&forward_stereo, weak_self, std::placeholders::_1, std::placeholders::_2));
     sync_subs_cam.push_back(left);
     sync_subs_cam.push_back(right);
     sync_cam.push_back(sync);
