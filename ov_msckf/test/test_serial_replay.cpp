@@ -271,3 +271,29 @@ TEST(SerialFeeder, ReplayDisablesTimeDependentInitialization) {
   EXPECT_GE(options.init_options.init_dyn_mle_max_time, 1e9);
   EXPECT_FALSE(make_replay_deterministic(options));
 }
+
+TEST(InputMasks, StayAlignedWithDownsampledImages) {
+  VioManagerOptions options;
+  auto camera = std::make_shared<ov_core::CamRadtan>(320, 240); // calibration is already halved when downsampling
+  Eigen::Matrix<double, 8, 1> calibration;
+  calibration << 200, 200, 160, 120, 0, 0, 0, 0;
+  camera->set_value(calibration);
+  options.camera_intrinsics[0] = camera;
+  options.use_mask = true;
+  options.masks[0] = cv::Mat::zeros(240, 320, CV_8UC1);
+  options.masks[0](cv::Rect(0, 0, 160, 240)).setTo(255);
+
+  // The estimator halves each image and its mask together, which must give back the configured mask
+  options.downsample_cameras = true;
+  const cv::Mat input = options.input_masks().at(0);
+  ASSERT_EQ(input.size(), cv::Size(640, 480));
+  cv::Mat halved;
+  cv::pyrDown(input, halved, cv::Size(320, 240));
+  EXPECT_GT(halved.at<uint8_t>(120, 40), 127);
+  EXPECT_LT(halved.at<uint8_t>(120, 280), 127);
+
+  options.downsample_cameras = false;
+  EXPECT_EQ(options.input_masks().at(0).size(), cv::Size(320, 240));
+  options.use_mask = false;
+  EXPECT_EQ(cv::countNonZero(options.input_masks().at(0)), 0);
+}

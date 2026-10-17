@@ -112,12 +112,9 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_p
   const bool reset_on_jump = boolean("reset_on_time_jump", true);
   measurements = std::make_unique<Ros2MeasurementBuffer>(max_imu_queue, max_camera_queue, sensor_options->state_options.num_cameras,
                                                          sensor_options->track_frequency, reset_on_jump);
-  for (const auto &camera : sensor_options->camera_intrinsics) {
-    const int factor = sensor_options->downsample_cameras ? 2 : 1;
-    const cv::Size size(camera.second->w() * factor, camera.second->h() * factor);
-    image_sizes.emplace(camera.first, size);
-    zero_masks.emplace(camera.first, cv::Mat::zeros(size, CV_8UC1));
-  }
+  input_masks = sensor_options->input_masks();
+  for (const auto &mask : input_masks)
+    image_sizes.emplace(mask.first, mask.second.size());
 
   // Setup our transform broadcaster
   mTfBr = std::make_shared<tf2_ros::TransformBroadcaster>(node);
@@ -594,7 +591,7 @@ bool ROS2Visualizer::append_image(CameraData &message, const sensor_msgs::msg::I
     message.sensor_ids.push_back(camera_id);
     // The tracker retains and preprocesses these pixels; ROS message storage cannot outlive this callback.
     message.images.push_back(converted->image.clone());
-    message.masks.push_back(sensor_options->use_mask ? sensor_options->masks.at(camera_id) : zero_masks.at(camera_id));
+    message.masks.push_back(input_masks.at(camera_id));
     return true;
   } catch (const std::exception &error) {
     RCLCPP_WARN_THROTTLE(_node->get_logger(), *_node->get_clock(), 2000, "Rejected camera image: %s", error.what());

@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
     PRINT_INFO("[REPLAY]: %zu IMU samples, %zu of %zu synchronized frames selected, %zu unmatched images\n", imu.size(), frames.size(),
                dataset.frames().size(), dataset.unmatched_frames());
 
-    const auto masks = replay_masks(params);
+    const auto masks = params.input_masks();
     auto app = std::make_shared<VioManager>(params);
     app->set_active_image_enabled(false); // only loop-closure outputs draw it, and nothing is published here
     TrajectoryWriter trajectory((boost::filesystem::path(args.output) / "trajectory.txt").string());

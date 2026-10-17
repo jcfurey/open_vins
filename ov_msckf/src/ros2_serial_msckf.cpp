@@ -167,7 +167,7 @@ int main(int argc, char **argv) {
         viz->visualize();
     });
 
-    const auto masks = replay_masks(params);
+    const auto masks = params.input_masks();
     FrameSynchronizer synchronizer(num_cameras, sync_tolerance);
     double window_begin = std::numeric_limits<double>::quiet_NaN(), window_end = std::numeric_limits<double>::infinity();
     size_t messages = 0, decode_failures = 0, stale_images = 0;

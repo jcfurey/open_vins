@@ -203,7 +203,7 @@ protected:
 
   std::unique_ptr<Ros2MeasurementBuffer> measurements;
   std::unique_ptr<VioManagerOptions> sensor_options;
-  std::map<int, cv::Mat> zero_masks;
+  std::map<int, cv::Mat> input_masks; ///< Per-camera masks at the incoming image resolution
   std::map<int, cv::Size> image_sizes;
   rclcpp::CallbackGroup::SharedPtr imu_callback_group, camera_callback_group;
   std::thread estimator_thread;

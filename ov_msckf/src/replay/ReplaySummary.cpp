@@ -15,10 +15,6 @@
 #include <stdexcept>
 
 #include <boost/filesystem.hpp>
-#include <opencv2/imgproc.hpp>
-
-#include "cam/CamBase.h"
-#include "core/VioManagerOptions.h"
 
 using namespace ov_msckf;
 
@@ -58,25 +54,6 @@ double percentile(std::vector<double> values, double fraction) {
 }
 
 } // namespace
-
-std::map<int, cv::Mat> ov_msckf::replay_masks(const VioManagerOptions &params) {
-  std::map<int, cv::Mat> masks;
-  for (const auto &camera : params.camera_intrinsics) {
-    const int factor = params.downsample_cameras ? 2 : 1;
-    const cv::Size size(camera.second->w() * factor, camera.second->h() * factor);
-    cv::Mat mask = cv::Mat::zeros(size, CV_8UC1);
-    if (params.use_mask) {
-      // Configured masks match the (possibly downsampled) calibration; the tracker downsamples masks with the images.
-      const cv::Mat &configured = params.masks.at(camera.first);
-      if (configured.size() == size)
-        mask = configured;
-      else
-        cv::resize(configured, mask, size, 0.0, 0.0, cv::INTER_NEAREST);
-    }
-    masks.emplace(static_cast<int>(camera.first), mask);
-  }
-  return masks;
-}
 
 void ov_msckf::write_replay_summary(const std::string &path, const std::string &source, const SerialFeeder::Statistics &stats,
                                     const TrajectoryWriter &trajectory, const std::vector<double> &processing_seconds, double wall_seconds,

@@ -220,6 +220,31 @@ struct VioManagerOptions {
   std::map<size_t, cv::Mat> masks;
 
   /**
+   * @brief Per-camera masks at the resolution of incoming images (before any downsampling).
+   *
+   * Configured masks match the calibration, which is already halved when downsampling, while the estimator halves
+   * each incoming image and its mask together. Masks are upsampled to the input size so both stay aligned.
+   * Without masks this is an all-zero mask per camera.
+   */
+  std::map<int, cv::Mat> input_masks() const {
+    std::map<int, cv::Mat> result;
+    for (const auto &camera : camera_intrinsics) {
+      const int factor = downsample_cameras ? 2 : 1;
+      const cv::Size size(camera.second->w() * factor, camera.second->h() * factor);
+      cv::Mat mask = cv::Mat::zeros(size, CV_8UC1);
+      if (use_mask) {
+        const cv::Mat &configured = masks.at(camera.first);
+        if (configured.size() == size)
+          mask = configured;
+        else
+          cv::resize(configured, mask, size, 0.0, 0.0, cv::INTER_NEAREST);
+      }
+      result.emplace(static_cast<int>(camera.first), mask);
+    }
+    return result;
+  }
+
+  /**
    * @brief This function will load and print all state parameters (e.g. sensor extrinsics)
    * This allows for visual checking that everything was loaded properly from ROS/CMD parsers.
    *
