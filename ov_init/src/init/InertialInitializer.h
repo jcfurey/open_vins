@@ -87,7 +87,7 @@ public:
    * The features used are cloned from the feature database thus should be thread-safe
    * to continue to append new feature tracks to the database.
    *
-   * @param[out] timestamp Timestamp we have initialized the state at
+   * @param[out] timestamp Timestamp we have initialized the state at (camera clock)
    * @param[out] covariance Calculated covariance of the returned state
    * @param[out] order Order of the covariance matrix
    * @param[out] t_imu Our imu type (need to have correct ids)

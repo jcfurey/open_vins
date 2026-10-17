@@ -71,7 +71,7 @@ public:
    * This is only recommended if you have zero velocity update enabled to handle the stationary cases.
    * To initialize in this case, we need to have the average angular variance be below the set threshold (i.e. we need to be stationary).
    *
-   * @param[out] timestamp Timestamp we have initialized the state at
+   * @param[out] timestamp Timestamp we have initialized the state at (camera clock)
    * @param[out] covariance Calculated covariance of the returned state
    * @param[out] order Order of the covariance matrix
    * @param[out] t_imu Our imu type element

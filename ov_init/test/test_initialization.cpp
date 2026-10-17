@@ -82,6 +82,22 @@ TEST(StaticInitialization, StationaryStartRecoversGravityAndGyroBiasWithoutWaiti
   EXPECT_LT(time, 11.2);
 }
 
+TEST(StaticInitialization, ReturnsTheStateTimeInTheCameraClock) {
+  auto initialize_with_offset = [](double offset) {
+    Startup startup;
+    startup.options.calib_camimu_dt = offset;
+    TestInitializer initializer(startup.options, startup.features);
+    startup.feed(initializer);
+    double time = -1;
+    Eigen::MatrixXd covariance;
+    std::vector<std::shared_ptr<ov_type::Type>> order;
+    EXPECT_TRUE(initializer.initialize(time, covariance, order, std::make_shared<ov_type::IMU>(), false));
+    return time;
+  };
+  // t_imu = t_cam + calib_camimu_dt, and the IMU window is the same for both offsets
+  EXPECT_DOUBLE_EQ(initialize_with_offset(0.02), initialize_with_offset(0) - 0.02);
+}
+
 TEST(StaticInitialization, DefaultPolicyWaitsForMotion) {
   Startup startup;
   TestInitializer initializer(startup.options, startup.features);

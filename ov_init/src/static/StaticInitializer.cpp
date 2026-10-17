@@ -130,8 +130,8 @@ bool StaticInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarianc
   Eigen::Vector3d bg = w_avg_2to1;
   Eigen::Vector3d ba = a_avg_2to1 - quat_2_Rot(q_GtoI) * gravity_inG;
 
-  // Set our state variables
-  timestamp = window_2to1.at(window_2to1.size() - 1).timestamp;
+  // Set our state variables (the state is stamped in the camera clock, t_imu = t_cam + calib_camimu_dt)
+  timestamp = window_2to1.at(window_2to1.size() - 1).timestamp - params.calib_camimu_dt;
   Eigen::VectorXd imu_state = Eigen::VectorXd::Zero(16);
   imu_state.block(0, 0, 4, 1) = q_GtoI;
   imu_state.block(10, 0, 3, 1) = bg;
