@@ -41,6 +41,13 @@ list(APPEND thirdparty_libraries
 if (NOT catkin_FOUND OR NOT ENABLE_ROS)
 
     message(STATUS "MANUALLY LINKING TO OV_CORE LIBRARY....")
+    # The ov_core sources compiled in below need OpenCV
+    find_package(OpenCV 3 QUIET)
+    if (NOT OpenCV_FOUND)
+        find_package(OpenCV 4 REQUIRED)
+    endif ()
+    include_directories(${OpenCV_INCLUDE_DIRS})
+    list(APPEND thirdparty_libraries ${OpenCV_LIBRARIES})
     file(GLOB_RECURSE OVCORE_LIBRARY_SOURCES "${CMAKE_SOURCE_DIR}/../ov_core/src/*.cpp")
     list(FILTER OVCORE_LIBRARY_SOURCES EXCLUDE REGEX ".*test_profile\\.cpp$")
     list(FILTER OVCORE_LIBRARY_SOURCES EXCLUDE REGEX ".*test_webcam\\.cpp$")
