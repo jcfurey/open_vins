@@ -851,7 +851,7 @@ void Propagator::compute_F_and_G_discrete(std::shared_ptr<State> state, double d
   // begin to add the state transition matrix for the acc intrinsics Da part
   if (Da_id != -1) {
     Eigen::MatrixXd H_Da = compute_H_Da(state, a_uncorrected);
-    F.block(th_id, Da_id, 3, state->_calib_imu_da->size()) = -dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Tg * R_atoI * H_Da;
+    F.block(th_id, Da_id, 3, state->_calib_imu_da->size()) = -dR_ktok1 * Jr_ktok1 * dt * R_wtoI * Dw * Tg * R_atoI * H_Da;
     F.block(p_id, Da_id, 3, state->_calib_imu_da->size()) = 0.5 * R_k.transpose() * dt * dt * R_atoI * H_Da;
     F.block(v_id, Da_id, 3, state->_calib_imu_da->size()) = R_k.transpose() * dt * R_atoI * H_Da;
     F.block(Da_id, Da_id, state->_calib_imu_da->size(), state->_calib_imu_da->size()).setIdentity();
