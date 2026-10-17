@@ -109,27 +109,27 @@ void TrackKLT::feed_monocular(const CameraData &message, size_t msg_id) {
 
   // If we didn't have any successful tracks last time, just extract this time
   // This also handles, the tracking initalization on the first call to this extractor
-  if (pts_last[cam_id].empty()) {
+  if (pts_last.at(cam_id).empty()) {
     // Detect new features
     std::vector<cv::KeyPoint> good_left;
     std::vector<size_t> good_ids_left;
     perform_detection_monocular(imgpyr, mask, good_left, good_ids_left);
     // Save the current image and pyramid
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id] = img;
-    img_pyramid_last[cam_id] = imgpyr;
-    img_mask_last[cam_id] = mask;
-    pts_last[cam_id] = good_left;
-    ids_last[cam_id] = good_ids_left;
+    img_last.at(cam_id) = img;
+    img_pyramid_last.at(cam_id) = imgpyr;
+    img_mask_last.at(cam_id) = mask;
+    pts_last.at(cam_id) = good_left;
+    ids_last.at(cam_id) = good_ids_left;
     return;
   }
 
   // First we should make that the last images have enough features so we can do KLT
   // This will "top-off" our number of tracks so always have a constant number
-  int pts_before_detect = (int)pts_last[cam_id].size();
-  auto pts_left_old = pts_last[cam_id];
-  auto ids_left_old = ids_last[cam_id];
-  perform_detection_monocular(img_pyramid_last[cam_id], img_mask_last[cam_id], pts_left_old, ids_left_old);
+  int pts_before_detect = (int)pts_last.at(cam_id).size();
+  auto pts_left_old = pts_last.at(cam_id);
+  auto ids_left_old = ids_last.at(cam_id);
+  perform_detection_monocular(img_pyramid_last.at(cam_id), img_mask_last.at(cam_id), pts_left_old, ids_left_old);
   rT3 = boost::posix_time::microsec_clock::local_time();
 
   // Our return success masks, and predicted new features
@@ -137,18 +137,18 @@ void TrackKLT::feed_monocular(const CameraData &message, size_t msg_id) {
   std::vector<cv::KeyPoint> pts_left_new = pts_left_old;
 
   // Lets track temporally
-  perform_matching(img_pyramid_last[cam_id], imgpyr, pts_left_old, pts_left_new, cam_id, cam_id, mask_ll);
+  perform_matching(img_pyramid_last.at(cam_id), imgpyr, pts_left_old, pts_left_new, cam_id, cam_id, mask_ll);
   assert(pts_left_new.size() == ids_left_old.size());
   rT4 = boost::posix_time::microsec_clock::local_time();
 
   // If any of our mask is empty, that means we didn't have enough to do ransac, so just return
   if (mask_ll.empty()) {
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id] = img;
-    img_pyramid_last[cam_id] = imgpyr;
-    img_mask_last[cam_id] = mask;
-    pts_last[cam_id].clear();
-    ids_last[cam_id].clear();
+    img_last.at(cam_id) = img;
+    img_pyramid_last.at(cam_id) = imgpyr;
+    img_mask_last.at(cam_id) = mask;
+    pts_last.at(cam_id).clear();
+    ids_last.at(cam_id).clear();
     PRINT_ERROR(RED "[KLT-EXTRACTOR]: Failed to get enough points to do RANSAC, resetting.....\n" RESET);
     return;
   }
@@ -183,18 +183,18 @@ void TrackKLT::feed_monocular(const CameraData &message, size_t msg_id) {
   // Move forward in time
   {
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id] = img;
-    img_pyramid_last[cam_id] = imgpyr;
-    img_mask_last[cam_id] = mask;
-    pts_last[cam_id] = good_left;
-    ids_last[cam_id] = good_ids_left;
+    img_last.at(cam_id) = img;
+    img_pyramid_last.at(cam_id) = imgpyr;
+    img_mask_last.at(cam_id) = mask;
+    pts_last.at(cam_id) = good_left;
+    ids_last.at(cam_id) = good_ids_left;
   }
   rT5 = boost::posix_time::microsec_clock::local_time();
 
   // Timing information
   PRINT_ALL("[TIME-KLT]: %.4f seconds for pyramid\n", (rT2 - rT1).total_microseconds() * 1e-6);
   PRINT_ALL("[TIME-KLT]: %.4f seconds for detection (%zu detected)\n", (rT3 - rT2).total_microseconds() * 1e-6,
-            (int)pts_last[cam_id].size() - pts_before_detect);
+            (int)pts_last.at(cam_id).size() - pts_before_detect);
   PRINT_ALL("[TIME-KLT]: %.4f seconds for temporal klt\n", (rT4 - rT3).total_microseconds() * 1e-6);
   PRINT_ALL("[TIME-KLT]: %.4f seconds for feature DB update (%d features)\n", (rT5 - rT4).total_microseconds() * 1e-6,
             (int)good_left.size());

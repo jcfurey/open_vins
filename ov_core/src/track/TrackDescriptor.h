@@ -53,7 +53,10 @@ public:
   explicit TrackDescriptor(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numfeats, int numaruco, bool stereo,
                            HistogramMethod histmethod, int fast_threshold, int gridx, int gridy, int minpxdist, double knnratio)
       : TrackBase(cameras, numfeats, numaruco, stereo, histmethod), threshold(fast_threshold), grid_x(gridx), grid_y(gridy),
-        min_px_dist(minpxdist), knn_ratio(knnratio) {}
+        min_px_dist(minpxdist), knn_ratio(knnratio) {
+    for (const auto &camera : camera_calib)
+      desc_last[camera.first];
+  }
 
   /**
    * @brief Process a new image

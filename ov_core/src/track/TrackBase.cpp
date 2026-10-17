@@ -38,6 +38,15 @@ TrackBase::TrackBase(std::unordered_map<size_t, std::shared_ptr<CamBase>> camera
     std::vector<std::mutex> list(camera_calib.size());
     mtx_feeds.swap(list);
   }
+
+  // Create every per-camera entry up front. Cameras can be tracked on parallel threads, which must only look up
+  // existing entries: inserting into these maps concurrently is a data race.
+  for (const auto &camera : camera_calib) {
+    img_last[camera.first];
+    img_mask_last[camera.first];
+    pts_last[camera.first];
+    ids_last[camera.first];
+  }
 }
 
 void TrackBase::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2, int g2, int b2, std::string overlay) {
@@ -51,6 +60,9 @@ void TrackBase::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2,
     img_mask_last_cache = img_mask_last;
     pts_last_cache = pts_last;
   }
+  // Cameras that have not produced an image yet have empty entries
+  for (auto it = img_last_cache.begin(); it != img_last_cache.end();)
+    it = it->second.empty() ? img_last_cache.erase(it) : std::next(it);
 
   // Get the largest width and height
   int max_width = -1;
@@ -130,6 +142,9 @@ void TrackBase::display_history(cv::Mat &img_out, int r1, int g1, int b1, int r2
     pts_last_cache = pts_last;
     ids_last_cache = ids_last;
   }
+  // Cameras that have not produced an image yet have empty entries
+  for (auto it = img_last_cache.begin(); it != img_last_cache.end();)
+    it = it->second.empty() ? img_last_cache.erase(it) : std::next(it);
 
   // Get the largest width and height
   int max_width = -1;

@@ -78,9 +78,9 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
   }
 
   // Clear the old data from the last timestep
-  ids_aruco[cam_id].clear();
-  corners[cam_id].clear();
-  rejects[cam_id].clear();
+  ids_aruco.at(cam_id).clear();
+  corners.at(cam_id).clear();
+  rejects.at(cam_id).clear();
 
   // If we are downsizing, then downsize
   cv::Mat img0;
@@ -95,9 +95,9 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
 
   // Perform extraction
 #if CV_MAJOR_VERSION > 4 || ( CV_MAJOR_VERSION == 4 && CV_MINOR_VERSION >= 7)
-  aruco_detector.detectMarkers(img0, corners[cam_id], ids_aruco[cam_id], rejects[cam_id]);
+  aruco_detector.detectMarkers(img0, corners.at(cam_id), ids_aruco.at(cam_id), rejects.at(cam_id));
 #else
-  cv::aruco::detectMarkers(img0, aruco_dict, corners[cam_id], ids_aruco[cam_id], aruco_params, rejects[cam_id]);
+  cv::aruco::detectMarkers(img0, aruco_dict, corners.at(cam_id), ids_aruco.at(cam_id), aruco_params, rejects.at(cam_id));
 #endif
   rT2 = boost::posix_time::microsec_clock::local_time();
 
@@ -108,16 +108,16 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
   // Note: we do this so we can use these results for visulization later
   // Note: and so that the uv added is in the same image size
   if (do_downsizing) {
-    for (size_t i = 0; i < corners[cam_id].size(); i++) {
-      for (size_t j = 0; j < corners[cam_id].at(i).size(); j++) {
-        corners[cam_id].at(i).at(j).x *= 2;
-        corners[cam_id].at(i).at(j).y *= 2;
+    for (size_t i = 0; i < corners.at(cam_id).size(); i++) {
+      for (size_t j = 0; j < corners.at(cam_id).at(i).size(); j++) {
+        corners.at(cam_id).at(i).at(j).x *= 2;
+        corners.at(cam_id).at(i).at(j).y *= 2;
       }
     }
-    for (size_t i = 0; i < rejects[cam_id].size(); i++) {
-      for (size_t j = 0; j < rejects[cam_id].at(i).size(); j++) {
-        rejects[cam_id].at(i).at(j).x *= 2;
-        rejects[cam_id].at(i).at(j).y *= 2;
+    for (size_t i = 0; i < rejects.at(cam_id).size(); i++) {
+      for (size_t j = 0; j < rejects.at(cam_id).at(i).size(); j++) {
+        rejects.at(cam_id).at(i).at(j).x *= 2;
+        rejects.at(cam_id).at(i).at(j).y *= 2;
       }
     }
   }
@@ -130,25 +130,26 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
   std::vector<cv::KeyPoint> pts_new;
 
   // Append to our feature database this new information
-  for (size_t i = 0; i < ids_aruco[cam_id].size(); i++) {
+  for (size_t i = 0; i < ids_aruco.at(cam_id).size(); i++) {
     // Skip if ID is greater then our max
-    if (ids_aruco[cam_id].at(i) > max_tag_id)
+    if (ids_aruco.at(cam_id).at(i) > max_tag_id)
       continue;
     // Assert we have 4 points (we will only use one of them)
-    assert(corners[cam_id].at(i).size() == 4);
+    assert(corners.at(cam_id).at(i).size() == 4);
     for (int n = 0; n < 4; n++) {
       // Check if it is in the mask
       // NOTE: mask has max value of 255 (white) if it should be
-      if (maskin.at<uint8_t>((int)corners[cam_id].at(i).at(n).y, (int)corners[cam_id].at(i).at(n).x) > 127)
+      if (maskin.at<uint8_t>((int)corners.at(cam_id).at(i).at(n).y, (int)corners.at(cam_id).at(i).at(n).x) > 127)
         continue;
       // Try to undistort the point
-      cv::Point2f npt_l = camera_calib.at(cam_id)->undistort_cv(corners[cam_id].at(i).at(n));
+      cv::Point2f npt_l = camera_calib.at(cam_id)->undistort_cv(corners.at(cam_id).at(i).at(n));
       // Append to the ids vector and database
-      size_t tmp_id = (size_t)ids_aruco[cam_id].at(i) + n * max_tag_id;
-      database->update_feature(tmp_id, timestamp, cam_id, corners[cam_id].at(i).at(n).x, corners[cam_id].at(i).at(n).y, npt_l.x, npt_l.y);
+      size_t tmp_id = (size_t)ids_aruco.at(cam_id).at(i) + n * max_tag_id;
+      database->update_feature(tmp_id, timestamp, cam_id, corners.at(cam_id).at(i).at(n).x, corners.at(cam_id).at(i).at(n).y, npt_l.x,
+                               npt_l.y);
       // Append to active tracked point list
       cv::KeyPoint kpt;
-      kpt.pt = corners[cam_id].at(i).at(n);
+      kpt.pt = corners.at(cam_id).at(i).at(n);
       ids_new.push_back(tmp_id);
       pts_new.push_back(kpt);
     }
@@ -157,10 +158,10 @@ void TrackAruco::perform_tracking(double timestamp, const cv::Mat &imgin, size_t
   // Move forward in time
   {
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id] = img;
-    img_mask_last[cam_id] = maskin;
-    ids_last[cam_id] = ids_new;
-    pts_last[cam_id] = pts_new;
+    img_last.at(cam_id) = img;
+    img_mask_last.at(cam_id) = maskin;
+    ids_last.at(cam_id) = ids_new;
+    pts_last.at(cam_id) = pts_new;
   }
   rT3 = boost::posix_time::microsec_clock::local_time();
 
@@ -180,6 +181,9 @@ void TrackAruco::display_active(cv::Mat &img_out, int r1, int g1, int b1, int r2
     img_last_cache = img_last;
     img_mask_last_cache = img_mask_last;
   }
+  // Cameras that have not produced an image yet have empty entries
+  for (auto it = img_last_cache.begin(); it != img_last_cache.end();)
+    it = it->second.empty() ? img_last_cache.erase(it) : std::next(it);
   auto ids_aruco_cache = ids_aruco;
   auto corners_cache = corners;
   auto rejects_cache = rejects;

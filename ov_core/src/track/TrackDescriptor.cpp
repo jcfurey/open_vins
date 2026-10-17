@@ -84,17 +84,17 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
   mask = message.masks.at(msg_id);
 
   // If we are the first frame (or have lost tracking), initialize our descriptors
-  if (pts_last.find(cam_id) == pts_last.end() || pts_last[cam_id].empty()) {
+  if (pts_last.find(cam_id) == pts_last.end() || pts_last.at(cam_id).empty()) {
     std::vector<cv::KeyPoint> good_left;
     std::vector<size_t> good_ids_left;
     cv::Mat good_desc_left;
     perform_detection_monocular(img, mask, good_left, good_desc_left, good_ids_left);
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id] = img;
-    img_mask_last[cam_id] = mask;
-    pts_last[cam_id] = good_left;
-    ids_last[cam_id] = good_ids_left;
-    desc_last[cam_id] = good_desc_left;
+    img_last.at(cam_id) = img;
+    img_mask_last.at(cam_id) = mask;
+    pts_last.at(cam_id) = good_left;
+    ids_last.at(cam_id) = good_ids_left;
+    desc_last.at(cam_id) = good_desc_left;
     return;
   }
 
@@ -111,7 +111,7 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
   std::vector<cv::DMatch> matches_ll;
 
   // Lets match temporally
-  robust_match(pts_last[cam_id], pts_new, desc_last[cam_id], desc_new, cam_id, cam_id, matches_ll);
+  robust_match(pts_last.at(cam_id), pts_new, desc_last.at(cam_id), desc_new, cam_id, cam_id, matches_ll);
   rT3 = boost::posix_time::microsec_clock::local_time();
 
   // Get our "good tracks"
@@ -140,7 +140,7 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
     good_left.push_back(pts_new[i]);
     good_desc_left.push_back(desc_new.row((int)i));
     if (idll != -1) {
-      good_ids_left.push_back(ids_last[cam_id][idll]);
+      good_ids_left.push_back(ids_last.at(cam_id)[idll]);
       num_tracklast++;
     } else {
       good_ids_left.push_back(ids_new[i]);
@@ -160,11 +160,11 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
   // Move forward in time
   {
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id] = img;
-    img_mask_last[cam_id] = mask;
-    pts_last[cam_id] = good_left;
-    ids_last[cam_id] = good_ids_left;
-    desc_last[cam_id] = good_desc_left;
+    img_last.at(cam_id) = img;
+    img_mask_last.at(cam_id) = mask;
+    pts_last.at(cam_id) = good_left;
+    ids_last.at(cam_id) = good_ids_left;
+    desc_last.at(cam_id) = good_desc_left;
   }
   rT5 = boost::posix_time::microsec_clock::local_time();
 

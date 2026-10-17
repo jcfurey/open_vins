@@ -54,6 +54,11 @@ public:
   explicit TrackAruco(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numaruco, bool stereo, HistogramMethod histmethod,
                       bool downsize)
       : TrackBase(cameras, 0, numaruco, stereo, histmethod), max_tag_id(numaruco), do_downsizing(downsize) {
+    for (const auto &camera : camera_calib) {
+      ids_aruco[camera.first];
+      corners[camera.first];
+      rejects[camera.first];
+    }
 #if ENABLE_ARUCO_TAGS
 #if CV_MAJOR_VERSION > 4 || ( CV_MAJOR_VERSION == 4 && CV_MINOR_VERSION >= 7)
     aruco_dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_1000);
@@ -120,7 +125,6 @@ protected:
   // Parameters the opencv extractor uses
   cv::Ptr<cv::aruco::DetectorParameters> aruco_params;
 #endif
-
 
   // Our tag IDs and corner we will get from the extractor
   std::unordered_map<size_t, std::vector<int>> ids_aruco;
