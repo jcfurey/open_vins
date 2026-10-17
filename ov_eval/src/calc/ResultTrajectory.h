@@ -186,6 +186,9 @@ protected:
       int best_idx = -1;
       double best_error = max_dist_diff;
       for (size_t i = idx; i < distances.size(); i++) {
+        // Distances are cumulative, so no later pose can be within tolerance once we pass it
+        if (distances.at(i) > distance_startpose + distance + max_dist_diff)
+          break;
         if (std::abs(distances.at(i) - (distance_startpose + distance)) < best_error) {
           best_idx = i;
           best_error = std::abs(distances.at(i) - (distance_startpose + distance));
