@@ -25,6 +25,8 @@
 #include <Eigen/Eigen>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <map>
 #include <sstream>
 #include <string>
 
@@ -120,15 +122,11 @@ public:
       return false;
     }
 
-    // Loop through gt states and find the closest time stamp
-    double closest_time = INFINITY;
-    auto it0 = gt_states.begin();
-    while (it0 != gt_states.end()) {
-      if (std::abs(it0->first - timestep) < std::abs(closest_time - timestep)) {
-        closest_time = it0->first;
-      }
-      it0++;
-    }
+    // Find the closest time stamp (the earlier one on ties) with a binary search
+    auto after = gt_states.lower_bound(timestep);
+    double closest_time = (after == gt_states.end()) ? INFINITY : after->first;
+    if (after != gt_states.begin() && std::abs(std::prev(after)->first - timestep) <= std::abs(closest_time - timestep))
+      closest_time = std::prev(after)->first;
 
     // If close to this timestamp, then use it
     if (std::abs(closest_time - timestep) < 0.10) {

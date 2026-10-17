@@ -93,6 +93,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_stereo_mask ov_core_lib)
     ament_add_gtest(test_binocular_tracking test/test_binocular_tracking.cpp)
     target_link_libraries(test_binocular_tracking ov_core_lib)
+    ament_add_gtest(test_dataset_reader test/test_dataset_reader.cpp)
+    target_link_libraries(test_dataset_reader ov_core_lib)
 endif()
 
 # finally define this as the package
