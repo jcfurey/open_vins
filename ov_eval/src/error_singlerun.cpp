@@ -21,7 +21,11 @@
 
 #include <Eigen/Eigen>
 #include <boost/filesystem.hpp>
+#include <cmath>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "calc/ResultTrajectory.h"
 #include "utils/colors.h"
@@ -90,9 +94,27 @@ int main(int argc, char **argv) {
   // Ensure we have a path
   if (argc < 4) {
     PRINT_ERROR(RED "ERROR: Please specify a align mode, groudtruth, and algorithm run file\n" RESET);
-    PRINT_ERROR(RED "ERROR: ./error_singlerun <align_mode> <file_gt.txt> <file_est.txt>\n" RESET);
+    PRINT_ERROR(RED "ERROR: ./error_singlerun <align_mode> <file_gt.txt> <file_est.txt> [--json out.json] [--segments 8,16,...]\n" RESET);
     PRINT_ERROR(RED "ERROR: rosrun ov_eval error_singlerun <align_mode> <file_gt.txt> <file_est.txt>\n" RESET);
     std::exit(EXIT_FAILURE);
+  }
+
+  // Optional machine-readable summary (skips the final plots) and RPE segment lengths
+  std::string path_json;
+  std::vector<double> segments = {8.0, 16.0, 24.0, 32.0, 40.0};
+  for (int i = 4; i < argc; i++) {
+    const std::string arg = argv[i];
+    if (arg == "--json" && i + 1 < argc) {
+      path_json = argv[++i];
+    } else if (arg == "--segments" && i + 1 < argc) {
+      segments.clear();
+      std::stringstream list(argv[++i]);
+      for (std::string item; std::getline(list, item, ',');)
+        segments.push_back(std::stod(item));
+    } else {
+      PRINT_ERROR(RED "ERROR: unknown option %s\n" RESET, arg.c_str());
+      std::exit(EXIT_FAILURE);
+    }
   }
 
   // Load it!
@@ -131,7 +153,6 @@ int main(int argc, char **argv) {
   //===========================================================
 
   // Calculate
-  std::vector<double> segments = {8.0, 16.0, 24.0, 32.0, 40.0};
   std::map<double, std::pair<ov_eval::Statistics, ov_eval::Statistics>> error_rpe;
   traj.calculate_rpe(segments, error_rpe);
 
@@ -143,6 +164,68 @@ int main(int argc, char **argv) {
     PRINT_INFO("seg %d - median_ori = %.3f | median_pos = %.3f (%d samples)\n", (int)seg.first, seg.second.first.median,
                seg.second.second.median, (int)seg.second.second.values.size());
     // PRINT_DEBUG("seg %d - std_ori  = %.3f | std_pos  = %.3f\n",(int)seg.first,seg.second.first.std,seg.second.second.std);
+  }
+
+  //===========================================================
+  // Normalized Estimation Error Squared
+  //===========================================================
+
+  // Calculate
+  ov_eval::Statistics nees_ori, nees_pos;
+  traj.calculate_nees(nees_ori, nees_pos);
+
+  // Print it
+  PRINT_INFO("======================================\n");
+  PRINT_INFO("Normalized Estimation Error Squared\n");
+  PRINT_INFO("======================================\n");
+  PRINT_INFO("mean_ori = %.3f | mean_pos = %.3f\n", nees_ori.mean, nees_pos.mean);
+  PRINT_INFO("min_ori  = %.3f | min_pos  = %.3f\n", nees_ori.min, nees_pos.min);
+  PRINT_INFO("max_ori  = %.3f | max_pos  = %.3f\n", nees_ori.max, nees_pos.max);
+  PRINT_INFO("std_ori  = %.3f | std_pos  = %.3f\n", nees_ori.std, nees_pos.std);
+  PRINT_INFO("======================================\n");
+
+  // Machine-readable summary for scripted benchmarks
+  if (!path_json.empty()) {
+    auto number = [](double value) {
+      std::ostringstream text;
+      text.precision(10);
+      if (std::isfinite(value))
+        text << value;
+      else
+        text << "null";
+      return text.str();
+    };
+    std::vector<double> est_times;
+    std::vector<Eigen::Matrix<double, 7, 1>> est_poses;
+    std::vector<Eigen::Matrix3d> est_cov_ori, est_cov_pos;
+    ov_eval::Loader::load_data(argv[3], est_times, est_poses, est_cov_ori, est_cov_pos);
+    std::ofstream json(path_json, std::ofstream::trunc);
+    json << "{\n  \"alignment\": \"" << argv[1] << "\",\n";
+    json << "  \"estimate_poses\": " << est_times.size() << ",\n  \"matched_poses\": " << traj.matched_poses() << ",\n";
+    json << "  \"matched_duration_s\": " << number(traj.matched_duration()) << ",\n";
+    json << "  \"groundtruth_length_m\": " << number(length) << ",\n";
+    json << "  \"ate\": {\"rmse_ori_deg\": " << number(error_ori.rmse) << ", \"rmse_pos_m\": " << number(error_pos.rmse)
+         << ", \"mean_ori_deg\": " << number(error_ori.mean) << ", \"mean_pos_m\": " << number(error_pos.mean)
+         << ", \"median_ori_deg\": " << number(error_ori.median) << ", \"median_pos_m\": " << number(error_pos.median)
+         << ", \"max_ori_deg\": " << number(error_ori.max) << ", \"max_pos_m\": " << number(error_pos.max) << "},\n";
+    json << "  \"rpe\": [";
+    bool first = true;
+    for (const auto &seg : error_rpe) {
+      json << (first ? "\n" : ",\n") << "    {\"segment_m\": " << number(seg.first) << ", \"samples\": " << seg.second.second.values.size()
+           << ", \"median_ori_deg\": " << number(seg.second.first.median) << ", \"median_pos_m\": " << number(seg.second.second.median)
+           << ", \"mean_ori_deg\": " << number(seg.second.first.mean) << ", \"mean_pos_m\": " << number(seg.second.second.mean) << "}";
+      first = false;
+    }
+    json << "\n  ],\n  \"nees\": ";
+    if (nees_ori.values.empty())
+      json << "null\n}\n";
+    else
+      json << "{\"mean_ori\": " << number(nees_ori.mean) << ", \"mean_pos\": " << number(nees_pos.mean) << "}\n}\n";
+    if (!json) {
+      PRINT_ERROR(RED "ERROR: unable to write %s\n" RESET, path_json.c_str());
+      return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
   }
 
 #ifdef HAVE_PYTHONLIBS
@@ -194,24 +277,6 @@ int main(int argc, char **argv) {
   matplotlibcpp::show(false);
 
 #endif
-
-  //===========================================================
-  // Normalized Estimation Error Squared
-  //===========================================================
-
-  // Calculate
-  ov_eval::Statistics nees_ori, nees_pos;
-  traj.calculate_nees(nees_ori, nees_pos);
-
-  // Print it
-  PRINT_INFO("======================================\n");
-  PRINT_INFO("Normalized Estimation Error Squared\n");
-  PRINT_INFO("======================================\n");
-  PRINT_INFO("mean_ori = %.3f | mean_pos = %.3f\n", nees_ori.mean, nees_pos.mean);
-  PRINT_INFO("min_ori  = %.3f | min_pos  = %.3f\n", nees_ori.min, nees_pos.min);
-  PRINT_INFO("max_ori  = %.3f | max_pos  = %.3f\n", nees_ori.max, nees_pos.max);
-  PRINT_INFO("std_ori  = %.3f | std_pos  = %.3f\n", nees_ori.std, nees_pos.std);
-  PRINT_INFO("======================================\n");
 
 #ifdef HAVE_PYTHONLIBS
 

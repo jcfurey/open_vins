@@ -148,6 +148,12 @@ public:
   void calculate_error(Statistics &posx, Statistics &posy, Statistics &posz, Statistics &orix, Statistics &oriy, Statistics &oriz,
                        Statistics &roll, Statistics &pitch, Statistics &yaw);
 
+  /// Number of estimated poses associated with ground truth
+  size_t matched_poses() const { return est_times.size(); }
+
+  /// Time spanned by the associated poses (seconds)
+  double matched_duration() const { return est_times.empty() ? 0.0 : est_times.back() - est_times.front(); }
+
 protected:
   // Trajectory data (loaded from file and timestamp intersected)
   std::vector<double> est_times, gt_times;
