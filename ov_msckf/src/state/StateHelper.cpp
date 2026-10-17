@@ -471,7 +471,7 @@ bool StateHelper::initialize(std::shared_ptr<State> state, std::shared_ptr<Type>
   // Get what our threshold should be
   boost::math::chi_squared chi_squared_dist(res.rows());
   double chi2_check = boost::math::quantile(chi_squared_dist, 0.95);
-  if (chi2 > chi_2_mult * chi2_check) {
+  if (!std::isfinite(chi2) || chi2 > chi_2_mult * chi2_check) {
     return false;
   }
 

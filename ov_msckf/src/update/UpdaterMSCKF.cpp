@@ -221,8 +221,8 @@ void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_
       PRINT_WARNING(YELLOW "chi2_check over the residual limit - %d\n" RESET, (int)res.rows());
     }
 
-    // Check if we should delete or not
-    if (chi2 > _options.chi2_multipler * chi2_check) {
+    // Check if we should delete or not (a non-finite test, e.g. from a NaN residual, would poison the stacked update)
+    if (!std::isfinite(chi2) || chi2 > _options.chi2_multipler * chi2_check) {
       (*it2)->to_delete = true;
       it2 = feature_vec.erase(it2);
       // PRINT_DEBUG("featid = %d\n", feat.featid);
