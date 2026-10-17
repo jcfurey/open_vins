@@ -84,11 +84,15 @@ void TrackKLT::feed_new_camera(const CameraData &message) {
   } else if (num_images == 2 && use_stereo) {
     feed_stereo(message, 0, 1);
   } else if (!use_stereo) {
+    // Track cameras in parallel, then commit them in camera order so feature ids do not depend on thread scheduling
+    std::vector<MonocularTrack> tracks(num_images);
     parallel_for_(cv::Range(0, (int)num_images), LambdaBody([&](const cv::Range &range) {
                     for (int i = range.start; i < range.end; i++) {
-                      feed_monocular(message, i);
+                      tracks.at(i) = track_monocular(message, i);
                     }
                   }));
+    for (auto &track : tracks)
+      commit_monocular(message, track);
   } else {
     PRINT_ERROR(RED "[ERROR]: invalid number of images passed %zu, we only support mono or stereo tracking", num_images);
     std::exit(EXIT_FAILURE);
@@ -96,72 +100,58 @@ void TrackKLT::feed_new_camera(const CameraData &message) {
 }
 
 void TrackKLT::feed_monocular(const CameraData &message, size_t msg_id) {
+  MonocularTrack track = track_monocular(message, msg_id);
+  commit_monocular(message, track);
+}
+
+TrackKLT::MonocularTrack TrackKLT::track_monocular(const CameraData &message, size_t msg_id) {
 
   // Lock this data feed for this camera
-  size_t cam_id = message.sensor_ids.at(msg_id);
+  MonocularTrack track;
+  track.cam_id = message.sensor_ids.at(msg_id);
+  const size_t cam_id = track.cam_id;
   std::lock_guard<std::mutex> lck(mtx_feeds.at(cam_id));
 
   // Get our image objects for this image
-  cv::Mat img = img_curr.at(cam_id);
-  std::vector<cv::Mat> imgpyr = img_pyramid_curr.at(cam_id);
-  cv::Mat mask = message.masks.at(msg_id);
-  rT2 = boost::posix_time::microsec_clock::local_time();
+  track.img = img_curr.at(cam_id);
+  track.imgpyr = img_pyramid_curr.at(cam_id);
+  track.mask = message.masks.at(msg_id);
+  const auto time_start = boost::posix_time::microsec_clock::local_time();
 
   // If we didn't have any successful tracks last time, just extract this time
   // This also handles, the tracking initalization on the first call to this extractor
   if (pts_last.at(cam_id).empty()) {
-    // Detect new features
-    std::vector<cv::KeyPoint> good_left;
-    std::vector<size_t> good_ids_left;
-    perform_detection_monocular(imgpyr, mask, good_left, good_ids_left);
-    // Save the current image and pyramid
-    std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last.at(cam_id) = img;
-    img_pyramid_last.at(cam_id) = imgpyr;
-    img_mask_last.at(cam_id) = mask;
-    pts_last.at(cam_id) = good_left;
-    ids_last.at(cam_id) = good_ids_left;
-    return;
+    perform_detection_monocular(track.imgpyr, track.mask, track.pts, track.ids, track.detected);
+    return track;
   }
 
   // First we should make that the last images have enough features so we can do KLT
   // This will "top-off" our number of tracks so always have a constant number
-  int pts_before_detect = (int)pts_last.at(cam_id).size();
   auto pts_left_old = pts_last.at(cam_id);
   auto ids_left_old = ids_last.at(cam_id);
-  perform_detection_monocular(img_pyramid_last.at(cam_id), img_mask_last.at(cam_id), pts_left_old, ids_left_old);
-  rT3 = boost::posix_time::microsec_clock::local_time();
+  perform_detection_monocular(img_pyramid_last.at(cam_id), img_mask_last.at(cam_id), pts_left_old, ids_left_old, track.detected);
+  const auto time_detect = boost::posix_time::microsec_clock::local_time();
 
   // Our return success masks, and predicted new features
   std::vector<uchar> mask_ll;
   std::vector<cv::KeyPoint> pts_left_new = pts_left_old;
 
   // Lets track temporally
-  perform_matching(img_pyramid_last.at(cam_id), imgpyr, pts_left_old, pts_left_new, cam_id, cam_id, mask_ll);
+  perform_matching(img_pyramid_last.at(cam_id), track.imgpyr, pts_left_old, pts_left_new, cam_id, cam_id, mask_ll);
   assert(pts_left_new.size() == ids_left_old.size());
-  rT4 = boost::posix_time::microsec_clock::local_time();
+  const auto time_klt = boost::posix_time::microsec_clock::local_time();
 
   // If any of our mask is empty, that means we didn't have enough to do ransac, so just return
   if (mask_ll.empty()) {
-    std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last.at(cam_id) = img;
-    img_pyramid_last.at(cam_id) = imgpyr;
-    img_mask_last.at(cam_id) = mask;
-    pts_last.at(cam_id).clear();
-    ids_last.at(cam_id).clear();
     PRINT_ERROR(RED "[KLT-EXTRACTOR]: Failed to get enough points to do RANSAC, resetting.....\n" RESET);
-    return;
+    return track;
   }
 
   // Get our "good tracks"
-  std::vector<cv::KeyPoint> good_left;
-  std::vector<size_t> good_ids_left;
-
-  // Loop through all left points
   for (size_t i = 0; i < pts_left_new.size(); i++) {
     // Ensure we do not have any bad KLT tracks (i.e., points are negative)
-    if (pts_left_new.at(i).pt.x < 0 || pts_left_new.at(i).pt.y < 0 || (int)pts_left_new.at(i).pt.x >= img.cols ||
-        (int)pts_left_new.at(i).pt.y >= img.rows)
+    if (pts_left_new.at(i).pt.x < 0 || pts_left_new.at(i).pt.y < 0 || (int)pts_left_new.at(i).pt.x >= track.img.cols ||
+        (int)pts_left_new.at(i).pt.y >= track.img.rows)
       continue;
     // Check if it is in the mask
     // NOTE: mask has max value of 255 (white) if it should be
@@ -169,36 +159,41 @@ void TrackKLT::feed_monocular(const CameraData &message, size_t msg_id) {
       continue;
     // If it is a good track, and also tracked from left to right
     if (mask_ll[i]) {
-      good_left.push_back(pts_left_new[i]);
-      good_ids_left.push_back(ids_left_old[i]);
+      track.pts.push_back(pts_left_new[i]);
+      track.ids.push_back(ids_left_old[i]);
+    }
+  }
+  track.update_database = true;
+
+  // Timing information
+  PRINT_ALL("[TIME-KLT]: %.4f seconds for detection (%zu detected)\n", (time_detect - time_start).total_microseconds() * 1e-6,
+            track.detected);
+  PRINT_ALL("[TIME-KLT]: %.4f seconds for temporal klt\n", (time_klt - time_detect).total_microseconds() * 1e-6);
+  return track;
+}
+
+void TrackKLT::commit_monocular(const CameraData &message, MonocularTrack &track) {
+
+  // Lock this data feed for this camera
+  const size_t cam_id = track.cam_id;
+  std::lock_guard<std::mutex> lck(mtx_feeds.at(cam_id));
+  resolve_pending_ids(track.ids, track.detected);
+
+  // Update our feature database, with theses new observations
+  if (track.update_database) {
+    for (size_t i = 0; i < track.pts.size(); i++) {
+      cv::Point2f npt_l = camera_calib.at(cam_id)->undistort_cv(track.pts.at(i).pt);
+      database->update_feature(track.ids.at(i), message.timestamp, cam_id, track.pts.at(i).pt.x, track.pts.at(i).pt.y, npt_l.x, npt_l.y);
     }
   }
 
-  // Update our feature database, with theses new observations
-  for (size_t i = 0; i < good_left.size(); i++) {
-    cv::Point2f npt_l = camera_calib.at(cam_id)->undistort_cv(good_left.at(i).pt);
-    database->update_feature(good_ids_left.at(i), message.timestamp, cam_id, good_left.at(i).pt.x, good_left.at(i).pt.y, npt_l.x, npt_l.y);
-  }
-
   // Move forward in time
-  {
-    std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last.at(cam_id) = img;
-    img_pyramid_last.at(cam_id) = imgpyr;
-    img_mask_last.at(cam_id) = mask;
-    pts_last.at(cam_id) = good_left;
-    ids_last.at(cam_id) = good_ids_left;
-  }
-  rT5 = boost::posix_time::microsec_clock::local_time();
-
-  // Timing information
-  PRINT_ALL("[TIME-KLT]: %.4f seconds for pyramid\n", (rT2 - rT1).total_microseconds() * 1e-6);
-  PRINT_ALL("[TIME-KLT]: %.4f seconds for detection (%zu detected)\n", (rT3 - rT2).total_microseconds() * 1e-6,
-            (int)pts_last.at(cam_id).size() - pts_before_detect);
-  PRINT_ALL("[TIME-KLT]: %.4f seconds for temporal klt\n", (rT4 - rT3).total_microseconds() * 1e-6);
-  PRINT_ALL("[TIME-KLT]: %.4f seconds for feature DB update (%d features)\n", (rT5 - rT4).total_microseconds() * 1e-6,
-            (int)good_left.size());
-  PRINT_ALL("[TIME-KLT]: %.4f seconds for total\n", (rT5 - rT1).total_microseconds() * 1e-6);
+  std::lock_guard<std::mutex> lckv(mtx_last_vars);
+  img_last.at(cam_id) = track.img;
+  img_pyramid_last.at(cam_id) = track.imgpyr;
+  img_mask_last.at(cam_id) = track.mask;
+  pts_last.at(cam_id) = track.pts;
+  ids_last.at(cam_id) = track.ids;
 }
 
 void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t msg_id_right) {
@@ -399,7 +394,7 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
 }
 
 void TrackKLT::perform_detection_monocular(const std::vector<cv::Mat> &img0pyr, const cv::Mat &mask0, std::vector<cv::KeyPoint> &pts0,
-                                           std::vector<size_t> &ids0) {
+                                           std::vector<size_t> &ids0, size_t &detected) {
 
   // Create a 2D occupancy grid for this current image
   // Note that we scale this down, so that each grid point is equal to a set of pixels
@@ -518,18 +513,14 @@ void TrackKLT::perform_detection_monocular(const std::vector<cv::Mat> &img0pyr, 
   }
 
   // Loop through and record only ones that are valid
-  // NOTE: if we multi-thread this atomic can cause some randomness due to multiple thread detecting features
-  // NOTE: this is due to the fact that we select update features based on feat id
-  // NOTE: thus the order will matter since we try to select oldest (smallest id) to update with
-  // NOTE: not sure how to remove... maybe a better way?
+  // NOTE: ids are pending until the caller commits this camera, so parallel cameras cannot interleave them
   for (size_t i = 0; i < pts0_new.size(); i++) {
     // update the uv coordinates
     kpts0_new.at(i).pt = pts0_new.at(i);
     // append the new uv coordinate
     pts0.push_back(kpts0_new.at(i));
-    // move id foward and append this new point
-    size_t temp = ++currid;
-    ids0.push_back(temp);
+    // append this new point with the next pending id
+    ids0.push_back(PENDING_ID | detected++);
   }
 }
 

@@ -176,6 +176,23 @@ protected:
   /// Mutex for editing the *_last variables
   std::mutex mtx_last_vars;
 
+  /// Marks an id handed out during parallel tracking; resolve_pending_ids() assigns the real id.
+  static constexpr size_t PENDING_ID = size_t(1) << (8 * sizeof(size_t) - 1);
+
+  /**
+   * @brief Replace pending ids with the next @p count unique ids, in detection order.
+   *
+   * Cameras tracked in parallel only hand out pending ids. Resolving them per camera in a fixed order keeps feature
+   * ids (and so the order of database updates and estimator updates) independent of thread scheduling.
+   */
+  void resolve_pending_ids(std::vector<size_t> &ids, size_t count) {
+    const size_t base = currid.fetch_add(count);
+    for (auto &id : ids) {
+      if (id & PENDING_ID)
+        id = base + (id & ~PENDING_ID) + 1;
+    }
+  }
+
   /// Last set of images (use map so all trackers render in the same order)
   std::map<size_t, cv::Mat> img_last;
 

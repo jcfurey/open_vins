@@ -49,11 +49,15 @@ void TrackDescriptor::feed_new_camera(const CameraData &message) {
   } else if (num_images == 2 && use_stereo) {
     feed_stereo(message, 0, 1);
   } else if (!use_stereo) {
+    // Track cameras in parallel, then commit them in camera order so feature ids do not depend on thread scheduling
+    std::vector<MonocularTrack> tracks(num_images);
     parallel_for_(cv::Range(0, (int)num_images), LambdaBody([&](const cv::Range &range) {
                     for (int i = range.start; i < range.end; i++) {
-                      feed_monocular(message, i);
+                      tracks.at(i) = track_monocular(message, i);
                     }
                   }));
+    for (auto &track : tracks)
+      commit_monocular(message, track);
   } else {
     PRINT_ERROR(RED "[ERROR]: invalid number of images passed %zu, we only support mono or stereo tracking", num_images);
     std::exit(EXIT_FAILURE);
@@ -61,41 +65,38 @@ void TrackDescriptor::feed_new_camera(const CameraData &message) {
 }
 
 void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
+  MonocularTrack track = track_monocular(message, msg_id);
+  commit_monocular(message, track);
+}
+
+TrackDescriptor::MonocularTrack TrackDescriptor::track_monocular(const CameraData &message, size_t msg_id) {
 
   // Start timing
-  rT1 = boost::posix_time::microsec_clock::local_time();
+  const auto time_start = boost::posix_time::microsec_clock::local_time();
 
   // Lock this data feed for this camera
-  size_t cam_id = message.sensor_ids.at(msg_id);
+  MonocularTrack track;
+  track.cam_id = message.sensor_ids.at(msg_id);
+  const size_t cam_id = track.cam_id;
   std::lock_guard<std::mutex> lck(mtx_feeds.at(cam_id));
 
   // Histogram equalize
-  cv::Mat img, mask;
   if (histogram_method == HistogramMethod::HISTOGRAM) {
-    cv::equalizeHist(message.images.at(msg_id), img);
+    cv::equalizeHist(message.images.at(msg_id), track.img);
   } else if (histogram_method == HistogramMethod::CLAHE) {
     double eq_clip_limit = 10.0;
     cv::Size eq_win_size = cv::Size(8, 8);
     cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(eq_clip_limit, eq_win_size);
-    clahe->apply(message.images.at(msg_id), img);
+    clahe->apply(message.images.at(msg_id), track.img);
   } else {
-    img = message.images.at(msg_id);
+    track.img = message.images.at(msg_id);
   }
-  mask = message.masks.at(msg_id);
+  track.mask = message.masks.at(msg_id);
 
   // If we are the first frame (or have lost tracking), initialize our descriptors
-  if (pts_last.find(cam_id) == pts_last.end() || pts_last.at(cam_id).empty()) {
-    std::vector<cv::KeyPoint> good_left;
-    std::vector<size_t> good_ids_left;
-    cv::Mat good_desc_left;
-    perform_detection_monocular(img, mask, good_left, good_desc_left, good_ids_left);
-    std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last.at(cam_id) = img;
-    img_mask_last.at(cam_id) = mask;
-    pts_last.at(cam_id) = good_left;
-    ids_last.at(cam_id) = good_ids_left;
-    desc_last.at(cam_id) = good_desc_left;
-    return;
+  if (pts_last.at(cam_id).empty()) {
+    perform_detection_monocular(track.img, track.mask, track.pts, track.desc, track.ids, track.detected);
+    return track;
   }
 
   // Our new keypoints and descriptor for the new image
@@ -104,23 +105,15 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
   std::vector<size_t> ids_new;
 
   // First, extract new descriptors for this new image
-  perform_detection_monocular(img, mask, pts_new, desc_new, ids_new);
-  rT2 = boost::posix_time::microsec_clock::local_time();
+  perform_detection_monocular(track.img, track.mask, pts_new, desc_new, ids_new, track.detected);
+  const auto time_detect = boost::posix_time::microsec_clock::local_time();
 
   // Our matches temporally
   std::vector<cv::DMatch> matches_ll;
 
   // Lets match temporally
   robust_match(pts_last.at(cam_id), pts_new, desc_last.at(cam_id), desc_new, cam_id, cam_id, matches_ll);
-  rT3 = boost::posix_time::microsec_clock::local_time();
-
-  // Get our "good tracks"
-  std::vector<cv::KeyPoint> good_left;
-  std::vector<size_t> good_ids_left;
-  cv::Mat good_desc_left;
-
-  // Count how many we have tracked from the last time
-  int num_tracklast = 0;
+  const auto time_match = boost::posix_time::microsec_clock::local_time();
 
   // Loop through all current left to right points
   // We want to see if any of theses have matches to the previous frame
@@ -137,44 +130,40 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
 
     // Then lets replace the current ID with the old ID if found
     // Else just append the current feature and its unique ID
-    good_left.push_back(pts_new[i]);
-    good_desc_left.push_back(desc_new.row((int)i));
-    if (idll != -1) {
-      good_ids_left.push_back(ids_last.at(cam_id)[idll]);
-      num_tracklast++;
-    } else {
-      good_ids_left.push_back(ids_new[i]);
-    }
+    track.pts.push_back(pts_new[i]);
+    track.desc.push_back(desc_new.row((int)i));
+    track.ids.push_back(idll != -1 ? ids_last.at(cam_id)[idll] : ids_new[i]);
   }
-  rT4 = boost::posix_time::microsec_clock::local_time();
-
-  // Update our feature database, with theses new observations
-  for (size_t i = 0; i < good_left.size(); i++) {
-    cv::Point2f npt_l = camera_calib.at(cam_id)->undistort_cv(good_left.at(i).pt);
-    database->update_feature(good_ids_left.at(i), message.timestamp, cam_id, good_left.at(i).pt.x, good_left.at(i).pt.y, npt_l.x, npt_l.y);
-  }
-
-  // Debug info
-  // PRINT_DEBUG("LtoL = %d | good = %d | fromlast = %d\n",(int)matches_ll.size(),(int)good_left.size(),num_tracklast);
-
-  // Move forward in time
-  {
-    std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last.at(cam_id) = img;
-    img_mask_last.at(cam_id) = mask;
-    pts_last.at(cam_id) = good_left;
-    ids_last.at(cam_id) = good_ids_left;
-    desc_last.at(cam_id) = good_desc_left;
-  }
-  rT5 = boost::posix_time::microsec_clock::local_time();
+  track.update_database = true;
 
   // Our timing information
-  PRINT_ALL("[TIME-DESC]: %.4f seconds for detection\n", (rT2 - rT1).total_microseconds() * 1e-6);
-  PRINT_ALL("[TIME-DESC]: %.4f seconds for matching\n", (rT3 - rT2).total_microseconds() * 1e-6);
-  PRINT_ALL("[TIME-DESC]: %.4f seconds for merging\n", (rT4 - rT3).total_microseconds() * 1e-6);
-  PRINT_ALL("[TIME-DESC]: %.4f seconds for feature DB update (%d features)\n", (rT5 - rT4).total_microseconds() * 1e-6,
-            (int)good_left.size());
-  PRINT_ALL("[TIME-DESC]: %.4f seconds for total\n", (rT5 - rT1).total_microseconds() * 1e-6);
+  PRINT_ALL("[TIME-DESC]: %.4f seconds for detection\n", (time_detect - time_start).total_microseconds() * 1e-6);
+  PRINT_ALL("[TIME-DESC]: %.4f seconds for matching\n", (time_match - time_detect).total_microseconds() * 1e-6);
+  return track;
+}
+
+void TrackDescriptor::commit_monocular(const CameraData &message, MonocularTrack &track) {
+
+  // Lock this data feed for this camera
+  const size_t cam_id = track.cam_id;
+  std::lock_guard<std::mutex> lck(mtx_feeds.at(cam_id));
+  resolve_pending_ids(track.ids, track.detected);
+
+  // Update our feature database, with theses new observations
+  if (track.update_database) {
+    for (size_t i = 0; i < track.pts.size(); i++) {
+      cv::Point2f npt_l = camera_calib.at(cam_id)->undistort_cv(track.pts.at(i).pt);
+      database->update_feature(track.ids.at(i), message.timestamp, cam_id, track.pts.at(i).pt.x, track.pts.at(i).pt.y, npt_l.x, npt_l.y);
+    }
+  }
+
+  // Move forward in time
+  std::lock_guard<std::mutex> lckv(mtx_last_vars);
+  img_last.at(cam_id) = track.img;
+  img_mask_last.at(cam_id) = track.mask;
+  pts_last.at(cam_id) = track.pts;
+  ids_last.at(cam_id) = track.ids;
+  desc_last.at(cam_id) = track.desc;
 }
 
 void TrackDescriptor::feed_stereo(const CameraData &message, size_t msg_id_left, size_t msg_id_right) {
@@ -353,7 +342,7 @@ void TrackDescriptor::feed_stereo(const CameraData &message, size_t msg_id_left,
 }
 
 void TrackDescriptor::perform_detection_monocular(const cv::Mat &img0, const cv::Mat &mask0, std::vector<cv::KeyPoint> &pts0,
-                                                  cv::Mat &desc0, std::vector<size_t> &ids0) {
+                                                  cv::Mat &desc0, std::vector<size_t> &ids0, size_t &detected) {
 
   // Assert that we need features
   assert(pts0.empty());
@@ -373,10 +362,7 @@ void TrackDescriptor::perform_detection_monocular(const cv::Mat &img0, const cv:
   cv::Mat grid_2d = cv::Mat::zeros(size, CV_8UC1);
 
   // For all good matches, lets append to our returned vectors
-  // NOTE: if we multi-thread this atomic can cause some randomness due to multiple thread detecting features
-  // NOTE: this is due to the fact that we select update features based on feat id
-  // NOTE: thus the order will matter since we try to select oldest (smallest id) to update with
-  // NOTE: not sure how to remove... maybe a better way?
+  // NOTE: ids are pending until the caller commits this camera, so parallel cameras cannot interleave them
   for (size_t i = 0; i < pts0_ext.size(); i++) {
     // Get current left keypoint, check that it is in bounds
     cv::KeyPoint kpt = pts0_ext.at(i);
@@ -393,9 +379,8 @@ void TrackDescriptor::perform_detection_monocular(const cv::Mat &img0, const cv:
     // Else we are good, append our keypoints and descriptors
     pts0.push_back(pts0_ext.at(i));
     desc0.push_back(desc0_ext.row((int)i));
-    // Set our IDs to be unique IDs here, will later replace with corrected ones, after temporal matching
-    size_t temp = ++currid;
-    ids0.push_back(temp);
+    // Set pending unique IDs here, will later replace with corrected ones, after temporal matching
+    ids0.push_back(PENDING_ID | detected++);
     grid_2d.at<uint8_t>(y_grid, x_grid) = 255;
   }
 }

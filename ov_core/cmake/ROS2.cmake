@@ -91,6 +91,8 @@ if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
     ament_add_gtest(test_stereo_mask test/test_stereo_mask.cpp)
     target_link_libraries(test_stereo_mask ov_core_lib)
+    ament_add_gtest(test_binocular_tracking test/test_binocular_tracking.cpp)
+    target_link_libraries(test_binocular_tracking ov_core_lib)
 endif()
 
 # finally define this as the package

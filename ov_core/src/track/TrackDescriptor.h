@@ -65,12 +65,28 @@ public:
   void feed_new_camera(const CameraData &message) override;
 
 protected:
+  /// One camera's tracking result. New features carry pending ids until commit_monocular() applies the result.
+  struct MonocularTrack {
+    size_t cam_id = 0;
+    cv::Mat img, mask, desc;
+    std::vector<cv::KeyPoint> pts;
+    std::vector<size_t> ids;
+    size_t detected = 0;          ///< pending ids handed out by detection
+    bool update_database = false; ///< false when tracking (re)started in this image
+  };
+
   /**
    * @brief Process a new monocular image
    * @param message Contains our timestamp, images, and camera ids
    * @param msg_id the camera index in message data vector
    */
   void feed_monocular(const CameraData &message, size_t msg_id);
+
+  /// Track one camera without touching shared state, so cameras can be tracked in parallel
+  MonocularTrack track_monocular(const CameraData &message, size_t msg_id);
+
+  /// Assign feature ids, update the database, and store the tracks; call in camera order
+  void commit_monocular(const CameraData &message, MonocularTrack &track);
 
   /**
    * @brief Process new stereo pair of images
@@ -87,6 +103,7 @@ protected:
    * @param pts0 vector of extracted keypoints
    * @param desc0 vector of the extracted descriptors
    * @param ids0 vector of all new IDs
+   * @param detected number of pending ids handed out to new features (incremented)
    *
    * Given a set of images, and their currently extracted features, this will try to add new features.
    * We return all extracted descriptors here since we DO NOT need to do stereo tracking left to right.
@@ -94,7 +111,7 @@ protected:
    * See robust_match() for the matching.
    */
   void perform_detection_monocular(const cv::Mat &img0, const cv::Mat &mask0, std::vector<cv::KeyPoint> &pts0, cv::Mat &desc0,
-                                   std::vector<size_t> &ids0);
+                                   std::vector<size_t> &ids0, size_t &detected);
 
   /**
    * @brief Detects new features in the current stereo pair
