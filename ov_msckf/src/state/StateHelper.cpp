@@ -35,6 +35,26 @@ using namespace ov_core;
 using namespace ov_type;
 using namespace ov_msckf;
 
+namespace {
+
+/// P*H^T for a Jacobian whose columns follow H_order, as one product over the gathered covariance columns
+/// (instead of one small product per state variable and measured variable, which repacks H for every state variable)
+Eigen::MatrixXd covariance_times_jacobian(const Eigen::MatrixXd &P, const std::vector<std::shared_ptr<Type>> &H_order,
+                                          const Eigen::MatrixXd &H) {
+  Eigen::Index cols = 0;
+  for (const auto &meas_var : H_order)
+    cols += meas_var->size();
+  Eigen::MatrixXd P_cols(P.rows(), cols);
+  cols = 0;
+  for (const auto &meas_var : H_order) {
+    P_cols.middleCols(cols, meas_var->size()) = P.middleCols(meas_var->id(), meas_var->size());
+    cols += meas_var->size();
+  }
+  return P_cols * H.leftCols(cols).transpose();
+}
+
+} // namespace
+
 void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector<std::shared_ptr<Type>> &order_NEW,
                                  const std::vector<std::shared_ptr<Type>> &order_OLD, const Eigen::MatrixXd &Phi,
                                  const Eigen::MatrixXd &Q) {
@@ -123,29 +143,7 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
   // Part of the Kalman Gain K = (P*H^T)*S^{-1} = M*S^{-1}
   assert(res.rows() == R.rows());
   assert(H.rows() == res.rows());
-  Eigen::MatrixXd M_a = Eigen::MatrixXd::Zero(state->_Cov.rows(), res.rows());
-
-  // Get the location in small jacobian for each measuring variable
-  int current_it = 0;
-  std::vector<int> H_id;
-  for (const auto &meas_var : H_order) {
-    H_id.push_back(current_it);
-    current_it += meas_var->size();
-  }
-
-  //==========================================================
-  //==========================================================
-  // For each active variable find its M = P*H^T
-  for (const auto &var : state->_variables) {
-    // Sum up effect of each subjacobian = K_i= \sum_m (P_im Hm^T)
-    Eigen::MatrixXd M_i = Eigen::MatrixXd::Zero(var->size(), res.rows());
-    for (size_t i = 0; i < H_order.size(); i++) {
-      std::shared_ptr<Type> meas_var = H_order[i];
-      M_i.noalias() += state->_Cov.block(var->id(), meas_var->id(), var->size(), meas_var->size()) *
-                       H.block(0, H_id[i], H.rows(), meas_var->size()).transpose();
-    }
-    M_a.block(var->id(), 0, var->size(), res.rows()) = M_i;
-  }
+  const Eigen::MatrixXd M_a = covariance_times_jacobian(state->_Cov, H_order, H);
 
   //==========================================================
   //==========================================================
@@ -524,29 +522,7 @@ void StateHelper::initialize_invertible(std::shared_ptr<State> state, std::share
   assert(res.rows() == R.rows());
   assert(H_L.rows() == res.rows());
   assert(H_L.rows() == H_R.rows());
-  Eigen::MatrixXd M_a = Eigen::MatrixXd::Zero(state->_Cov.rows(), res.rows());
-
-  // Get the location in small jacobian for each measuring variable
-  int current_it = 0;
-  std::vector<int> H_id;
-  for (const auto &meas_var : H_order) {
-    H_id.push_back(current_it);
-    current_it += meas_var->size();
-  }
-
-  //==========================================================
-  //==========================================================
-  // For each active variable find its M = P*H^T
-  for (const auto &var : state->_variables) {
-    // Sum up effect of each subjacobian= K_i= \sum_m (P_im Hm^T)
-    Eigen::MatrixXd M_i = Eigen::MatrixXd::Zero(var->size(), res.rows());
-    for (size_t i = 0; i < H_order.size(); i++) {
-      std::shared_ptr<Type> meas_var = H_order.at(i);
-      M_i += state->_Cov.block(var->id(), meas_var->id(), var->size(), meas_var->size()) *
-             H_R.block(0, H_id[i], H_R.rows(), meas_var->size()).transpose();
-    }
-    M_a.block(var->id(), 0, var->size(), res.rows()) = M_i;
-  }
+  const Eigen::MatrixXd M_a = covariance_times_jacobian(state->_Cov, H_order, H_R);
 
   //==========================================================
   //==========================================================

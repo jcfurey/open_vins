@@ -262,6 +262,39 @@ TEST(EkfUpdate, MatchesKnownLinearPosterior) {
   EXPECT_NEAR((posterior.block<3, 3>(3, 3) - 0.12 * Eigen::Matrix3d::Identity()).norm(), 0, 1e-12);
 }
 
+TEST(EkfUpdate, MatchesDenseUpdateOverACorrelatedSubsetOfTheState) {
+  auto estimate = state();
+  for (double time : {1.0, 2.0}) {
+    estimate->_timestamp = time;
+    StateHelper::augment_clone(estimate, Eigen::Vector3d::Zero());
+  }
+  const int size = estimate->max_covariance_size();
+  srand(3);
+  const Eigen::MatrixXd root = Eigen::MatrixXd::Random(size, size);
+  StateHelper::set_initial_covariance(estimate, root * root.transpose() + Eigen::MatrixXd::Identity(size, size),
+                                      {estimate->_imu, estimate->_clones_IMU.at(1.0), estimate->_clones_IMU.at(2.0)});
+  const Eigen::MatrixXd prior = StateHelper::get_full_covariance(estimate);
+  const Eigen::VectorXd imu_before = estimate->_imu->value();
+
+  // Measure the newest clone and the IMU, in that order, so the Jacobian columns are not in state order
+  const std::vector<std::shared_ptr<ov_type::Type>> order = {estimate->_clones_IMU.at(2.0), estimate->_imu};
+  const Eigen::MatrixXd H = Eigen::MatrixXd::Random(4, 21);
+  const Eigen::VectorXd res = Eigen::VectorXd::Random(4);
+  const Eigen::MatrixXd R = 0.5 * Eigen::MatrixXd::Identity(4, 4);
+  StateHelper::EKFUpdate(estimate, order, H, res, R);
+
+  Eigen::MatrixXd H_full = Eigen::MatrixXd::Zero(4, size);
+  H_full.middleCols(order.at(0)->id(), 6) = H.leftCols(6);
+  H_full.middleCols(order.at(1)->id(), 15) = H.rightCols(15);
+  const Eigen::MatrixXd K = prior * H_full.transpose() * (H_full * prior * H_full.transpose() + R).inverse();
+  const Eigen::MatrixXd posterior = prior - K * H_full * prior;
+  EXPECT_LT((StateHelper::get_full_covariance(estimate) - posterior).norm(), 1e-9 * posterior.norm());
+  // Position, velocity and biases update additively
+  const Eigen::VectorXd dx = K * res;
+  const Eigen::VectorXd expected = imu_before.tail(12) + dx.segment(estimate->_imu->id() + 3, 12);
+  EXPECT_LT((estimate->_imu->value().bottomRows(12) - expected).norm(), 1e-9 * expected.norm());
+}
+
 TEST(Ros2PointCloud, EmptyFeaturesProduceAValidEmptyCloud) {
   const auto cloud = ROSVisualizerHelper::get_ros_pointcloud(nullptr, {});
   EXPECT_EQ(cloud.width, 0U);
