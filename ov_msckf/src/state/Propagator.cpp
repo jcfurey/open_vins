@@ -304,10 +304,17 @@ std::vector<ov_core::ImuData> Propagator::select_imu_readings(const std::vector<
   selected.reserve(static_cast<size_t>(std::distance(first, last)) + 2);
   selected.push_back(sample(time0));
   for (auto it = first; it != last && it->timestamp < time1; ++it) {
-    if (!std::isfinite(it->timestamp) || it->timestamp <= selected.back().timestamp)
+    if (!std::isfinite(it->timestamp) || it->timestamp < selected.back().timestamp)
       return {};
+    // A sample on top of the interval start would only add a zero-length step (and, rejected, would stall
+    // propagation at this start time forever); skip it. Small clocks have sub-picosecond spacing.
+    if (it->timestamp - selected.back().timestamp <= 1e-12)
+      continue;
     selected.push_back(*it);
   }
+  // Likewise let the interval end replace a sample that sits on it
+  if (selected.size() > 1 && time1 - selected.back().timestamp <= 1e-12)
+    selected.pop_back();
   selected.push_back(sample(time1));
   if (!selected.front().wm.allFinite() || !selected.front().am.allFinite())
     return {};

@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
 
@@ -152,6 +153,17 @@ TEST(ImuInterpolation, RejectsANonfiniteFirstEndpoint) {
   auto bad = imu(1);
   bad.am(0) = std::numeric_limits<double>::quiet_NaN();
   EXPECT_TRUE(Propagator::select_imu_readings({bad, imu(2)}, 1, 2, false).empty());
+}
+
+TEST(ImuInterpolation, SkipsSamplesOnTheIntervalEnds) {
+  // At small clock values neighbouring doubles are far closer than 1e-12 s apart
+  const double start = 1.0, end = 1.01;
+  auto selected = Propagator::select_imu_readings(
+      {imu(0.995), imu(std::nextafter(start, 2.0), 1), imu(1.005, 2), imu(std::nextafter(end, 0.0), 3), imu(1.015)}, start, end, false);
+  ASSERT_EQ(selected.size(), 3U);
+  EXPECT_DOUBLE_EQ(selected[0].timestamp, start);
+  EXPECT_DOUBLE_EQ(selected[1].timestamp, 1.005);
+  EXPECT_DOUBLE_EQ(selected[2].timestamp, end);
 }
 
 TEST(Propagation, MissingImuDoesNotAdvanceStateOrClone) {
