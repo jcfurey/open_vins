@@ -80,8 +80,10 @@ IMU and image subscriptions use best-effort, volatile `SensorDataQoS`, which
 also connects to reliable publishers. Camera dimensions must match the supplied
 calibration. Stereo pairs must fall within `stereo_sync_tolerance`; independent
 camera streams are ordered in the ingress queue. Frames wait until IMU samples
-cover their timestamp plus the camera-to-IMU offset. Propagation requires full
-IMU interval coverage and never extrapolates missing endpoints.
+cover their timestamp plus the camera-to-IMU offset, and the worker receives
+only the IMU up to the sample that covers the next frame, so processing order
+matches an offline replay however far behind the worker runs. Propagation
+requires full IMU interval coverage and never extrapolates missing endpoints.
 
 The input queues and published paths are bounded. Camera overload drops the
 oldest queued frame. IMU queue overflow resets the estimator because continuing

@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -132,12 +133,23 @@ public:
     batch = Batch{};
     batch.reset = reset_pending_;
     reset_pending_ = false;
-    const double available_imu = imu_.empty() ? (batch.reset ? -1.0 : fed_imu_time) : imu_.back().timestamp;
-    batch.imu.swap(imu_);
-    if (camera_ready(available_imu, camera_to_imu_offset)) {
-      batch.camera = std::move(cameras_.front());
-      cameras_.pop_front();
+    // Hand over a frame together with only the IMU that reaches it, so the estimator sees measurements in the
+    // same order as an offline replay no matter how far behind the worker is.
+    const double fed = batch.reset ? -1.0 : fed_imu_time;
+    if (!cameras_.empty() && std::isfinite(camera_to_imu_offset)) {
+      const double needed = cameras_.front().timestamp + camera_to_imu_offset;
+      const auto cover =
+          std::lower_bound(imu_.begin(), imu_.end(), needed, [](const ov_core::ImuData &imu, double time) { return imu.timestamp < time; });
+      if (fed >= needed || cover != imu_.end()) {
+        const auto end = fed >= needed ? imu_.begin() : std::next(cover);
+        batch.imu.assign(std::make_move_iterator(imu_.begin()), std::make_move_iterator(end));
+        imu_.erase(imu_.begin(), end);
+        batch.camera = std::move(cameras_.front());
+        cameras_.pop_front();
+        return true;
+      }
     }
+    batch.imu.swap(imu_);
     return true;
   }
 

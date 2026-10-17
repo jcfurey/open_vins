@@ -49,6 +49,21 @@ TEST(Ros2Buffer, FramesWaitForImuInTheCorrectClock) {
   EXPECT_DOUBLE_EQ(batch.camera->timestamp, 2);
 }
 
+TEST(Ros2Buffer, ReleasesOnlyTheImuThatReachesTheNextFrame) {
+  Ros2MeasurementBuffer buffer(16, 4, 1, 100);
+  for (double time : {1.00, 1.01, 1.02, 1.03, 1.04})
+    buffer.push_imu(imu(time));
+  buffer.push_camera(camera(1.015));
+  Ros2MeasurementBuffer::Batch batch;
+  ASSERT_TRUE(buffer.wait_take(batch, -1, 0));
+  ASSERT_TRUE(batch.camera);
+  ASSERT_EQ(batch.imu.size(), 3U);
+  EXPECT_DOUBLE_EQ(batch.imu.back().timestamp, 1.02);
+  ASSERT_TRUE(buffer.wait_take(batch, 1.02, 0));
+  EXPECT_FALSE(batch.camera);
+  EXPECT_EQ(batch.imu.size(), 2U);
+}
+
 TEST(Ros2Buffer, SortsIndependentCameraStreams) {
   Ros2MeasurementBuffer buffer(8, 4, 2, 100);
   buffer.push_camera(camera(2, 0));
