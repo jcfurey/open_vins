@@ -19,11 +19,19 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <chrono>
 #include <csignal>
+#include <cstdio>
+#include <fstream>
 #include <memory>
 
+#include <boost/filesystem.hpp>
+
 #include "core/VioManager.h"
+#include "replay/ReplaySummary.h"
+#include "replay/TrajectoryWriter.h"
 #include "sim/Simulator.h"
+#include "state/State.h"
 #include "utils/colors.h"
 #include "utils/dataset_reader.h"
 #if ROS_AVAILABLE == 2
@@ -56,6 +64,7 @@ int main(int argc, char **argv) {
     if (argc > 1) {
       config_path = argv[1];
     }
+    std::string output_dir = argc > 2 ? argv[2] : "";
 
 #if ROS_AVAILABLE == 1
     // Launch our ros node
@@ -72,6 +81,7 @@ int main(int argc, char **argv) {
     const auto positional = rclcpp::remove_ros_arguments(argc, argv);
     config_path = positional.size() > 1 ? positional[1] : "unset_path_to_config.yaml";
     config_path = ov_core::startup_parameter<std::string>(*node, "config_path", config_path);
+    output_dir = ov_core::startup_parameter<std::string>(*node, "output_dir", positional.size() > 2 ? positional[2] : "");
 #endif
 
     // Load the config
@@ -149,6 +159,32 @@ int main(int argc, char **argv) {
     //===================================================================================
     //===================================================================================
 
+    // Optionally record the estimate and the matching ground truth (ov_eval format) for scripted evaluation
+    std::unique_ptr<TrajectoryWriter> trajectory;
+    std::ofstream groundtruth;
+    if (!output_dir.empty()) {
+      trajectory = std::make_unique<TrajectoryWriter>((boost::filesystem::path(output_dir) / "trajectory.txt").string());
+      groundtruth.open((boost::filesystem::path(output_dir) / "groundtruth.txt").string(), std::ofstream::trunc);
+      if (!groundtruth)
+        throw std::runtime_error("Unable to write groundtruth.txt in " + output_dir);
+      groundtruth << "# timestamp(s) tx ty tz qx qy qz qw\n";
+    }
+    auto record = [&]() {
+      if (!trajectory || !trajectory->write(*sys))
+        return;
+      // Same row time as the estimate; the true state comes from the true camera-to-IMU offset
+      Eigen::Matrix<double, 17, 1> truth;
+      if (!sim->get_state(sys->get_state()->_timestamp + sim->get_true_parameters().calib_camimu_dt, truth))
+        throw std::runtime_error("Simulator has no ground truth for an estimated state");
+      char row[256];
+      std::snprintf(row, sizeof(row), "%.9f %.9f %.9f %.9f %.9f %.9f %.9f %.9f\n", trajectory->last_time(), truth(5), truth(6), truth(7),
+                    truth(1), truth(2), truth(3), truth(4));
+      groundtruth << row;
+    };
+    SerialFeeder::Statistics stats;
+    std::vector<double> processing;
+    const auto wall_start = std::chrono::steady_clock::now();
+
     // Buffer our camera image
     double buffer_timecam = -1;
     std::vector<int> buffer_camids;
@@ -168,6 +204,7 @@ int main(int argc, char **argv) {
       bool hasimu = sim->get_next_imu(message_imu.timestamp, message_imu.wm, message_imu.am);
       if (hasimu) {
         sys->feed_measurement_imu(message_imu);
+        stats.imu_accepted++;
 #if ROS_AVAILABLE == 1 || ROS_AVAILABLE == 2
         viz->visualize_odometry(message_imu.timestamp);
 #endif
@@ -180,7 +217,12 @@ int main(int argc, char **argv) {
       bool hascam = sim->get_next_cam(time_cam, camids, feats);
       if (hascam) {
         if (buffer_timecam != -1) {
+          const auto frame_start = std::chrono::steady_clock::now();
           sys->feed_measurement_simulation(buffer_timecam, buffer_camids, buffer_feats);
+          processing.push_back(std::chrono::duration<double>(std::chrono::steady_clock::now() - frame_start).count());
+          stats.processing_seconds += processing.back();
+          stats.cameras_accepted = ++stats.cameras_processed;
+          record();
 #if ROS_AVAILABLE == 1 || ROS_AVAILABLE == 2
           viz->visualize();
 #endif
@@ -189,6 +231,13 @@ int main(int argc, char **argv) {
         buffer_camids = camids;
         buffer_feats = feats;
       }
+    }
+
+    if (trajectory) {
+      const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
+      write_replay_summary((boost::filesystem::path(output_dir) / "summary.json").string(), "simulation:" + config_path, stats, *trajectory,
+                           processing, wall);
+      PRINT_INFO("[SIM]: wrote %zu poses to %s (digest %s)\n", trajectory->count(), output_dir.c_str(), trajectory->digest().c_str());
     }
 
     // Final visualization
