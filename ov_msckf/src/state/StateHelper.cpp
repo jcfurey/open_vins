@@ -21,6 +21,8 @@
 
 #include "StateHelper.h"
 
+#include <stdexcept>
+
 #include "state/State.h"
 
 #include "types/Landmark.h"
@@ -40,7 +42,7 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector
   // We need at least one old and new variable
   if (order_NEW.empty() || order_OLD.empty()) {
     PRINT_ERROR(RED "StateHelper::EKFPropagation() - Called with empty variable arrays!\n" RESET);
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::EKFPropagation() called with empty variable arrays");
   }
 
   // Loop through our Phi order and ensure that they are continuous in memory
@@ -50,7 +52,7 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector
       PRINT_ERROR(RED "StateHelper::EKFPropagation() - Called with non-contiguous state elements!\n" RESET);
       PRINT_ERROR(
           RED "StateHelper::EKFPropagation() - This code only support a state transition which is in the same order as the state\n" RESET);
-      std::exit(EXIT_FAILURE);
+      throw std::runtime_error("StateHelper::EKFPropagation() requires contiguous state elements");
     }
     size_order_NEW += order_NEW.at(i + 1)->size();
   }
@@ -103,13 +105,13 @@ void StateHelper::EKFPropagation(std::shared_ptr<State> state, const std::vector
   Eigen::VectorXd diags = state->_Cov.diagonal();
   bool found_neg = false;
   for (int i = 0; i < diags.rows(); i++) {
-    if (diags(i) < 0.0) {
+    if (!(diags(i) >= 0.0)) {
       PRINT_WARNING(RED "StateHelper::EKFPropagation() - diagonal at %d is %.2f\n" RESET, i, diags(i));
       found_neg = true;
     }
   }
   if (found_neg) {
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::EKFPropagation() produced an invalid covariance");
   }
 }
 
@@ -178,13 +180,13 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
   Eigen::VectorXd diags = state->_Cov.diagonal();
   bool found_neg = false;
   for (int i = 0; i < diags.rows(); i++) {
-    if (diags(i) < 0.0) {
+    if (!(diags(i) >= 0.0)) {
       PRINT_WARNING(RED "StateHelper::EKFUpdate() - diagonal at %d is %.2f\n" RESET, i, diags(i));
       found_neg = true;
     }
   }
   if (found_neg) {
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::EKFUpdate() produced an invalid covariance");
   }
 
   // Calculate our delta and update all our active states
@@ -280,7 +282,7 @@ void StateHelper::marginalize(std::shared_ptr<State> state, std::shared_ptr<Type
   if (std::find(state->_variables.begin(), state->_variables.end(), marg) == state->_variables.end()) {
     PRINT_ERROR(RED "StateHelper::marginalize() - Called on variable that is not in the state\n" RESET);
     PRINT_ERROR(RED "StateHelper::marginalize() - Marginalization, does NOT work on sub-variables yet...\n" RESET);
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::marginalize() called on a variable that is not in the state");
   }
 
   // Generic covariance has this form for x_1, x_m, x_2. If we want to remove x_m:
@@ -388,7 +390,7 @@ std::shared_ptr<Type> StateHelper::clone(std::shared_ptr<State> state, std::shar
   if (new_clone == nullptr) {
     PRINT_ERROR(RED "StateHelper::clone() - Called on variable is not in the state\n" RESET);
     PRINT_ERROR(RED "StateHelper::clone() - Ensure that the variable specified is a variable, or sub-variable..\n" RESET);
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::clone() called on a variable that is not in the state");
   }
 
   // Add to variable list and return
@@ -404,7 +406,7 @@ bool StateHelper::initialize(std::shared_ptr<State> state, std::shared_ptr<Type>
   if (std::find(state->_variables.begin(), state->_variables.end(), new_variable) != state->_variables.end()) {
     PRINT_ERROR("StateHelper::initialize_invertible() - Called on variable that is already in the state\n");
     PRINT_ERROR("StateHelper::initialize_invertible() - Found this variable at %d in covariance\n", new_variable->id());
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::initialize() called on a variable that is already in the state");
   }
 
   // Check that we have isotropic noise (i.e. is diagonal and all the same value)
@@ -416,11 +418,11 @@ bool StateHelper::initialize(std::shared_ptr<State> state, std::shared_ptr<Type>
       if (r == c && R(0, 0) != R(r, c)) {
         PRINT_ERROR(RED "StateHelper::initialize() - Your noise is not isotropic!\n" RESET);
         PRINT_ERROR(RED "StateHelper::initialize() - Found a value of %.2f verses value of %.2f\n" RESET, R(r, c), R(0, 0));
-        std::exit(EXIT_FAILURE);
+        throw std::runtime_error("StateHelper::initialize() requires isotropic noise");
       } else if (r != c && R(r, c) != 0.0) {
         PRINT_ERROR(RED "StateHelper::initialize() - Your noise is not diagonal!\n" RESET);
         PRINT_ERROR(RED "StateHelper::initialize() - Found a value of %.2f at row %d and column %d\n" RESET, R(r, c), r, c);
-        std::exit(EXIT_FAILURE);
+        throw std::runtime_error("StateHelper::initialize() requires diagonal noise");
       }
     }
   }
@@ -495,7 +497,7 @@ void StateHelper::initialize_invertible(std::shared_ptr<State> state, std::share
   if (std::find(state->_variables.begin(), state->_variables.end(), new_variable) != state->_variables.end()) {
     PRINT_ERROR("StateHelper::initialize_invertible() - Called on variable that is already in the state\n");
     PRINT_ERROR("StateHelper::initialize_invertible() - Found this variable at %d in covariance\n", new_variable->id());
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::initialize_invertible() called on a variable that is already in the state");
   }
 
   // Check that we have isotropic noise (i.e. is diagonal and all the same value)
@@ -507,11 +509,11 @@ void StateHelper::initialize_invertible(std::shared_ptr<State> state, std::share
       if (r == c && R(0, 0) != R(r, c)) {
         PRINT_ERROR(RED "StateHelper::initialize_invertible() - Your noise is not isotropic!\n" RESET);
         PRINT_ERROR(RED "StateHelper::initialize_invertible() - Found a value of %.2f verses value of %.2f\n" RESET, R(r, c), R(0, 0));
-        std::exit(EXIT_FAILURE);
+        throw std::runtime_error("StateHelper::initialize_invertible() requires isotropic noise");
       } else if (r != c && R(r, c) != 0.0) {
         PRINT_ERROR(RED "StateHelper::initialize_invertible() - Your noise is not diagonal!\n" RESET);
         PRINT_ERROR(RED "StateHelper::initialize_invertible() - Found a value of %.2f at row %d and column %d\n" RESET, R(r, c), r, c);
-        std::exit(EXIT_FAILURE);
+        throw std::runtime_error("StateHelper::initialize_invertible() requires diagonal noise");
       }
     }
   }
@@ -587,7 +589,7 @@ void StateHelper::augment_clone(std::shared_ptr<State> state, Eigen::Matrix<doub
   // We can't insert a clone that occured at the same timestamp!
   if (state->_clones_IMU.find(state->_timestamp) != state->_clones_IMU.end()) {
     PRINT_ERROR(RED "TRIED TO INSERT A CLONE AT THE SAME TIME AS AN EXISTING CLONE, EXITING!#!@#!@#\n" RESET);
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::augment_clone() called at an existing clone time");
   }
 
   // Call on our cloner and add it to our vector of types
@@ -598,7 +600,7 @@ void StateHelper::augment_clone(std::shared_ptr<State> state, Eigen::Matrix<doub
   std::shared_ptr<PoseJPL> pose = std::dynamic_pointer_cast<PoseJPL>(posetemp);
   if (pose == nullptr) {
     PRINT_ERROR(RED "INVALID OBJECT RETURNED FROM STATEHELPER CLONE, EXITING!#!@#!@#\n" RESET);
-    std::exit(EXIT_FAILURE);
+    throw std::runtime_error("StateHelper::augment_clone() could not clone the IMU pose");
   }
 
   // Append the new clone to our clone vector
