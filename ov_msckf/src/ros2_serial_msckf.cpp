@@ -81,8 +81,8 @@ int main(int argc, char **argv) {
       node->declare_parameter<bool>(name, false, fixed, true);
     VioManagerOptions params;
     params.print_and_load(parser);
-    params.use_multi_threading_subs = false;
-    params.use_multi_threading_pubs = false;
+    if (make_replay_deterministic(params))
+      RCLCPP_INFO(node->get_logger(), "Dynamic initialization runs single-threaded without its time budget for reproducibility");
     const int num_cameras = params.state_options.num_cameras;
 
     const auto path_bag = ov_core::startup_parameter<std::string>(*node, "path_bag", "");

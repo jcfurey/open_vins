@@ -17,6 +17,16 @@
 namespace ov_msckf {
 
 class VioManager;
+struct VioManagerOptions;
+
+/**
+ * @brief Make estimator settings reproducible for offline replay.
+ *
+ * Initialization runs synchronously, and the dynamic initializer's optimization runs on one thread and ends on its
+ * iteration limit instead of a wall-clock budget (both the budget and Ceres' threaded cost sums vary between runs).
+ * @return true if the dynamic initializer settings were changed
+ */
+bool make_replay_deterministic(VioManagerOptions &params);
 
 /**
  * @brief Deterministic offline driver for the estimator.

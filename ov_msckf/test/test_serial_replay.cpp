@@ -256,3 +256,18 @@ TEST(FrameSynchronizer, PairsWithinToleranceAndDropsOrphans) {
   EXPECT_TRUE(sync.push(1, 1.30, image(8)));
   EXPECT_EQ(sync.unmatched(), 2U); // still pending at end of input
 }
+
+TEST(SerialFeeder, ReplayDisablesTimeDependentInitialization) {
+  auto options = mono_options(0.0);
+  options.use_multi_threading_subs = true;
+  options.init_options.init_dyn_use = false;
+  EXPECT_FALSE(make_replay_deterministic(options));
+  EXPECT_FALSE(options.use_multi_threading_subs);
+  options.init_options.init_dyn_use = true;
+  options.init_options.init_dyn_mle_max_threads = 6;
+  options.init_options.init_dyn_mle_max_time = 0.05;
+  EXPECT_TRUE(make_replay_deterministic(options));
+  EXPECT_EQ(options.init_options.init_dyn_mle_max_threads, 1);
+  EXPECT_GE(options.init_options.init_dyn_mle_max_time, 1e9);
+  EXPECT_FALSE(make_replay_deterministic(options));
+}

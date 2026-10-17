@@ -12,10 +12,21 @@
 #include <stdexcept>
 
 #include "core/VioManager.h"
+#include "core/VioManagerOptions.h"
 #include "state/State.h"
 #include "types/Vec.h"
 
 using namespace ov_msckf;
+
+bool ov_msckf::make_replay_deterministic(VioManagerOptions &params) {
+  params.use_multi_threading_subs = false;
+  params.use_multi_threading_pubs = false;
+  auto &init = params.init_options;
+  const bool changed = init.init_dyn_use && (init.init_dyn_mle_max_threads != 1 || init.init_dyn_mle_max_time < 1e9);
+  init.init_dyn_mle_max_threads = 1;
+  init.init_dyn_mle_max_time = 1e9; // Ceres' default, i.e. no practical limit
+  return changed;
+}
 
 SerialFeeder::SerialFeeder(std::shared_ptr<VioManager> app, UpdateCallback on_update)
     : app_(std::move(app)), on_update_(std::move(on_update)), last_imu_time_(-std::numeric_limits<double>::infinity()) {

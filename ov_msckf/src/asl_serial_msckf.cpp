@@ -98,9 +98,8 @@ int main(int argc, char **argv) {
 
     VioManagerOptions params;
     params.print_and_load(parser);
-    // Serial replay initializes synchronously, so a given input always yields the same estimator call sequence.
-    params.use_multi_threading_subs = false;
-    params.use_multi_threading_pubs = false;
+    if (make_replay_deterministic(params))
+      PRINT_INFO("[REPLAY]: dynamic initialization runs single-threaded without its time budget for reproducibility\n");
     if (!parser->successful())
       throw std::invalid_argument("Unable to parse required OpenVINS parameters");
     const int num_cameras = params.state_options.num_cameras;
