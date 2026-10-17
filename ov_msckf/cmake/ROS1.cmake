@@ -87,6 +87,10 @@ list(APPEND LIBRARY_SOURCES
         src/update/UpdaterMSCKF.cpp
         src/update/UpdaterSLAM.cpp
         src/update/UpdaterZeroVelocity.cpp
+        src/replay/AslDataset.cpp
+        src/replay/ReplaySummary.cpp
+        src/replay/SerialFeeder.cpp
+        src/replay/TrajectoryWriter.cpp
 )
 if (catkin_FOUND AND ENABLE_ROS)
     list(APPEND LIBRARY_SOURCES src/ros/ROS1Visualizer.cpp src/ros/ROSVisualizerHelper.cpp)
@@ -133,6 +137,14 @@ if (catkin_FOUND AND ENABLE_ROS)
     )
 
 endif ()
+
+add_executable(asl_serial_msckf src/asl_serial_msckf.cpp)
+target_link_libraries(asl_serial_msckf ov_msckf_lib ${thirdparty_libraries})
+install(TARGETS asl_serial_msckf
+        ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+        LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+        RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 add_executable(run_simulation src/run_simulation.cpp)
 target_link_libraries(run_simulation ov_msckf_lib ${thirdparty_libraries})

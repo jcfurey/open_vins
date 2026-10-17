@@ -71,6 +71,10 @@ list(APPEND LIBRARY_SOURCES
         src/update/UpdaterMSCKF.cpp
         src/update/UpdaterSLAM.cpp
         src/update/UpdaterZeroVelocity.cpp
+        src/replay/AslDataset.cpp
+        src/replay/ReplaySummary.cpp
+        src/replay/SerialFeeder.cpp
+        src/replay/TrajectoryWriter.cpp
 )
 list(APPEND LIBRARY_SOURCES src/ros/ROS2Visualizer.cpp src/ros/ROSVisualizerHelper.cpp)
 file(GLOB_RECURSE LIBRARY_HEADERS "src/*.h")
@@ -104,6 +108,10 @@ add_executable(run_subscribe_msckf src/run_subscribe_msckf.cpp)
 target_link_libraries(run_subscribe_msckf ov_msckf_lib ${thirdparty_libraries})
 install(TARGETS run_subscribe_msckf DESTINATION lib/${PROJECT_NAME})
 
+add_executable(asl_serial_msckf src/asl_serial_msckf.cpp)
+target_link_libraries(asl_serial_msckf ov_msckf_lib ${thirdparty_libraries})
+install(TARGETS asl_serial_msckf DESTINATION lib/${PROJECT_NAME})
+
 add_executable(run_simulation src/run_simulation.cpp)
 target_link_libraries(run_simulation ov_msckf_lib ${thirdparty_libraries})
 install(TARGETS run_simulation DESTINATION lib/${PROJECT_NAME})
@@ -126,6 +134,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_ros2_measurement_buffer ov_msckf_lib)
     ament_add_gtest(test_estimation_regressions test/test_estimation_regressions.cpp)
     target_link_libraries(test_estimation_regressions ov_msckf_lib)
+    ament_add_gtest(test_serial_replay test/test_serial_replay.cpp)
+    target_link_libraries(test_serial_replay ov_msckf_lib)
 endif()
 
 # finally define this as the package
