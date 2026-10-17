@@ -14,6 +14,8 @@ find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(message_filters REQUIRED)
+find_package(rosbag2_cpp REQUIRED)
+find_package(rosbag2_storage REQUIRED)
 find_package(ov_core REQUIRED)
 find_package(ov_init REQUIRED)
 
@@ -107,6 +109,10 @@ ament_export_dependencies(rclcpp rcl_interfaces tf2 tf2_ros tf2_geometry_msgs st
 add_executable(run_subscribe_msckf src/run_subscribe_msckf.cpp)
 target_link_libraries(run_subscribe_msckf ov_msckf_lib ${thirdparty_libraries})
 install(TARGETS run_subscribe_msckf DESTINATION lib/${PROJECT_NAME})
+
+add_executable(ros2_serial_msckf src/ros2_serial_msckf.cpp)
+target_link_libraries(ros2_serial_msckf ov_msckf_lib rosbag2_cpp::rosbag2_cpp rosbag2_storage::rosbag2_storage ${thirdparty_libraries})
+install(TARGETS ros2_serial_msckf DESTINATION lib/${PROJECT_NAME})
 
 add_executable(asl_serial_msckf src/asl_serial_msckf.cpp)
 target_link_libraries(asl_serial_msckf ov_msckf_lib ${thirdparty_libraries})

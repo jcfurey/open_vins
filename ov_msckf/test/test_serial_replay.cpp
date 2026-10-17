@@ -12,6 +12,7 @@
 #include "cam/CamRadtan.h"
 #include "core/VioManager.h"
 #include "replay/AslDataset.h"
+#include "replay/FrameSynchronizer.h"
 #include "replay/SerialFeeder.h"
 #include "replay/TrajectoryWriter.h"
 #include "state/State.h"
@@ -231,4 +232,27 @@ TEST(TrajectoryWriter, WritesImuClockPoseWithCovariances) {
   same.get_state()->_timestamp = 10.05;
   again.write(same);
   EXPECT_EQ(again.digest(), digest);
+}
+
+TEST(FrameSynchronizer, PairsWithinToleranceAndDropsOrphans) {
+  FrameSynchronizer sync(2, 0.005);
+  FrameSynchronizer::Frame frame;
+  auto image = [](int value) { return cv::Mat(1, 1, CV_8UC1, cv::Scalar(value)); };
+  EXPECT_TRUE(sync.push(0, 1.00, image(1)));
+  EXPECT_FALSE(sync.pop(frame)); // waits for camera 1
+  EXPECT_TRUE(sync.push(1, 1.002, image(2)));
+  ASSERT_TRUE(sync.pop(frame));
+  EXPECT_DOUBLE_EQ(frame.timestamp, 1.00);
+  EXPECT_EQ(frame.images.at(1).at<uint8_t>(0, 0), 2);
+  EXPECT_TRUE(sync.push(0, 1.05, image(3))); // never gets a partner
+  EXPECT_TRUE(sync.push(1, 1.10, image(4)));
+  EXPECT_FALSE(sync.pop(frame));
+  EXPECT_TRUE(sync.push(0, 1.10, image(5)));
+  ASSERT_TRUE(sync.pop(frame));
+  EXPECT_DOUBLE_EQ(frame.timestamp, 1.10);
+  EXPECT_EQ(sync.unmatched(), 1U);
+  EXPECT_FALSE(sync.push(0, 1.10, image(6))); // stale even though its queue is empty
+  EXPECT_FALSE(sync.push(2, 1.20, image(7))); // unknown camera
+  EXPECT_TRUE(sync.push(1, 1.30, image(8)));
+  EXPECT_EQ(sync.unmatched(), 2U); // still pending at end of input
 }

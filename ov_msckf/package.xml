@@ -50,6 +50,9 @@
     <depend condition="$ROS_VERSION == 2">cv_bridge</depend>
     <depend condition="$ROS_VERSION == 2">image_transport</depend>
     <depend condition="$ROS_VERSION == 2">message_filters</depend>
+    <depend condition="$ROS_VERSION == 2">rosbag2_cpp</depend>
+    <depend condition="$ROS_VERSION == 2">rosbag2_storage</depend>
+    <exec_depend condition="$ROS_VERSION == 2">rosbag2_storage_default_plugins</exec_depend>
     <depend condition="$ROS_VERSION == 2">ov_core</depend>
     <depend condition="$ROS_VERSION == 2">ov_init</depend>
 
