@@ -99,6 +99,7 @@ public:
 
     // Compute mean and rmse
     mean = 0;
+    rmse = 0;
     for (size_t i = 0; i < values_sorted.size(); i++) {
       assert(!std::isnan(values_sorted.at(i)));
       mean += values_sorted.at(i);
@@ -112,7 +113,7 @@ public:
     for (size_t i = 0; i < values_sorted.size(); i++) {
       std += std::pow(values_sorted.at(i) - mean, 2);
     }
-    std = std::sqrt(std / (values_sorted.size() - 1));
+    std = values_sorted.size() > 1 ? std::sqrt(std / (values_sorted.size() - 1)) : 0.0;
 
     // 99th percentile
     // TODO: is this correct?
@@ -125,6 +126,7 @@ public:
     timestamps.clear();
     values.clear();
     values_bound.clear();
+    rmse = mean = median = std = max = min = ninetynine = 0.0;
   }
 };
 

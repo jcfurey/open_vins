@@ -143,7 +143,7 @@ void AlignUtils::perform_association(double offset, double max_difference, std::
     if (best_gt_idx != -1) {
 
       // Save estimate and gt states for the match
-      est_times_temp.push_back(gt_times.at(best_gt_idx));
+      est_times_temp.push_back(est_times.at(i));
       est_poses_temp.push_back(est_poses.at(i));
       gt_times_temp.push_back(gt_times.at(best_gt_idx));
       gt_poses_temp.push_back(gt_poses.at(best_gt_idx));
@@ -166,12 +166,11 @@ void AlignUtils::perform_association(double offset, double max_difference, std::
     }
   }
 
-  // Ensure that we have enough associations
-  if (est_times.size() < 3) {
+  // Ensure that we have enough associations (callers treat fewer than three as a failure)
+  if (est_times_temp.size() < 3) {
     PRINT_ERROR(RED "[ALIGN]: Was unable to associate groundtruth and estimate trajectories\n" RESET);
-    PRINT_ERROR(RED "[ALIGN]: %d total matches....\n" RESET, (int)est_times.size());
+    PRINT_ERROR(RED "[ALIGN]: %d total matches....\n" RESET, (int)est_times_temp.size());
     PRINT_ERROR(RED "[ALIGN]: Do the time of the files match??\n" RESET);
-    return;
   }
   assert(est_times_temp.size() == gt_times_temp.size());
   // PRINT_DEBUG("[TRAJ]: %d est poses and %d gt poses => %d
