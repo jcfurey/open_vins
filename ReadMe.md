@@ -33,6 +33,10 @@ MAKEFLAGS='-j4' CMAKE_BUILD_PARALLEL_LEVEL=4 colcon build \
 source install/setup.bash
 ```
 
+On Ubuntu 24.04 with ROS 2 Jazzy, use the same commands with `jazzy` in place
+of `lyrical`. CI builds and tests Jazzy, Kilted, and Lyrical, plus a build
+without ROS.
+
 This builds all five packages: `ov_core`, `ov_data`, `ov_init`, `ov_msckf`, and
 `ov_eval`. The ROS 2 libraries export CMake targets and inherit the C++ standard
 required by the installed ROS distribution. Boost.System is header-only and
