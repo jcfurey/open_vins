@@ -151,9 +151,10 @@ void TrackDescriptor::commit_monocular(const CameraData &message, MonocularTrack
 
   // Update our feature database, with theses new observations
   if (track.update_database) {
+    const std::vector<cv::Point2f> pts_n = undistort_keypoints(cam_id, track.pts);
     for (size_t i = 0; i < track.pts.size(); i++) {
-      cv::Point2f npt_l = camera_calib.at(cam_id)->undistort_cv(track.pts.at(i).pt);
-      database->update_feature(track.ids.at(i), message.timestamp, cam_id, track.pts.at(i).pt.x, track.pts.at(i).pt.y, npt_l.x, npt_l.y);
+      database->update_feature(track.ids.at(i), message.timestamp, cam_id, track.pts.at(i).pt.x, track.pts.at(i).pt.y, pts_n.at(i).x,
+                               pts_n.at(i).y);
     }
   }
 
@@ -299,17 +300,16 @@ void TrackDescriptor::feed_stereo(const CameraData &message, size_t msg_id_left,
   //===================================================================================
 
   // Update our feature database, with theses new observations
+  const std::vector<cv::Point2f> good_left_n = undistort_keypoints(cam_id_left, good_left);
+  const std::vector<cv::Point2f> good_right_n = undistort_keypoints(cam_id_right, good_right);
   for (size_t i = 0; i < good_left.size(); i++) {
     // Assert that our IDs are the same
     assert(good_ids_left.at(i) == good_ids_right.at(i));
-    // Try to undistort the point
-    cv::Point2f npt_l = camera_calib.at(cam_id_left)->undistort_cv(good_left.at(i).pt);
-    cv::Point2f npt_r = camera_calib.at(cam_id_right)->undistort_cv(good_right.at(i).pt);
     // Append to the database
-    database->update_feature(good_ids_left.at(i), message.timestamp, cam_id_left, good_left.at(i).pt.x, good_left.at(i).pt.y, npt_l.x,
-                             npt_l.y);
-    database->update_feature(good_ids_left.at(i), message.timestamp, cam_id_right, good_right.at(i).pt.x, good_right.at(i).pt.y, npt_r.x,
-                             npt_r.y);
+    database->update_feature(good_ids_left.at(i), message.timestamp, cam_id_left, good_left.at(i).pt.x, good_left.at(i).pt.y,
+                             good_left_n.at(i).x, good_left_n.at(i).y);
+    database->update_feature(good_ids_left.at(i), message.timestamp, cam_id_right, good_right.at(i).pt.x, good_right.at(i).pt.y,
+                             good_right_n.at(i).x, good_right_n.at(i).y);
   }
 
   // Debug info
@@ -497,11 +497,8 @@ void TrackDescriptor::robust_match(const std::vector<cv::KeyPoint> &pts0, const 
 
   // Normalize these points, so we can then do ransac
   // We don't want to do ransac on distorted image uvs since the mapping is nonlinear
-  std::vector<cv::Point2f> pts0_n, pts1_n;
-  for (size_t i = 0; i < pts0_rsc.size(); i++) {
-    pts0_n.push_back(camera_calib.at(id0)->undistort_cv(pts0_rsc.at(i)));
-    pts1_n.push_back(camera_calib.at(id1)->undistort_cv(pts1_rsc.at(i)));
-  }
+  std::vector<cv::Point2f> pts0_n = camera_calib.at(id0)->undistort_cv(pts0_rsc);
+  std::vector<cv::Point2f> pts1_n = camera_calib.at(id1)->undistort_cv(pts1_rsc);
 
   // Do RANSAC outlier rejection (note since we normalized the max pixel error is now in the normalized cords)
   std::vector<uchar> mask_rsc;

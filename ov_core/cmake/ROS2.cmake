@@ -95,6 +95,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_binocular_tracking ov_core_lib)
     ament_add_gtest(test_dataset_reader test/test_dataset_reader.cpp)
     target_link_libraries(test_dataset_reader ov_core_lib)
+    ament_add_gtest(test_camera_models test/test_camera_models.cpp)
+    target_link_libraries(test_camera_models ov_core_lib)
 endif()
 
 # finally define this as the package

@@ -57,10 +57,13 @@ void TrackSIM::feed_measurement_simulation(double timestamp, const std::vector<i
       kpt.pt.y = feat.second(1);
       good_left.push_back(kpt);
       good_ids_left.push_back(id);
+    }
 
-      // Append to the database
-      cv::Point2f npt_l = camera_calib.at(cam_id)->undistort_cv(kpt.pt);
-      database->update_feature(id, timestamp, cam_id, kpt.pt.x, kpt.pt.y, npt_l.x, npt_l.y);
+    // Append to the database
+    const std::vector<cv::Point2f> good_left_n = undistort_keypoints(cam_id, good_left);
+    for (size_t j = 0; j < good_left.size(); j++) {
+      database->update_feature(good_ids_left.at(j), timestamp, cam_id, good_left.at(j).pt.x, good_left.at(j).pt.y, good_left_n.at(j).x,
+                               good_left_n.at(j).y);
     }
 
     // Get our width and height

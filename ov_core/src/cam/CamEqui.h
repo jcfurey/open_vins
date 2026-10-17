@@ -128,6 +128,20 @@ public:
     return pt_out;
   }
 
+  using CamBase::undistort_cv;
+
+  /**
+   * @brief Undistort a batch of raw uv points into normalized camera coords with one OpenCV call.
+   * @param uv_dist Raw uv coordinates we wish to undistort
+   * @return Normalized coordinates in the same order
+   */
+  std::vector<cv::Point2f> undistort_cv(const std::vector<cv::Point2f> &uv_dist) override {
+    std::vector<cv::Point2f> uv_norm;
+    if (!uv_dist.empty())
+      cv::fisheye::undistortPoints(uv_dist, uv_norm, camera_k_OPENCV, camera_d_OPENCV);
+    return uv_norm;
+  }
+
   /**
    * @brief Given a normalized uv coordinate this will distort it to the raw image plane
    * @param uv_norm Normalized coordinates we wish to distort

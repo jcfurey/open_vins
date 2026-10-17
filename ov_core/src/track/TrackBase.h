@@ -193,6 +193,9 @@ protected:
     }
   }
 
+  /// Normalized coordinates of one camera's keypoints, undistorted in a single batch
+  std::vector<cv::Point2f> undistort_keypoints(size_t cam_id, const std::vector<cv::KeyPoint> &kpts);
+
   /// Last set of images (use map so all trackers render in the same order)
   std::map<size_t, cv::Mat> img_last;
 

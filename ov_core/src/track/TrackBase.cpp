@@ -242,6 +242,12 @@ void TrackBase::display_history(cv::Mat &img_out, int r1, int g1, int b1, int r2
   }
 }
 
+std::vector<cv::Point2f> TrackBase::undistort_keypoints(size_t cam_id, const std::vector<cv::KeyPoint> &kpts) {
+  std::vector<cv::Point2f> pts;
+  cv::KeyPoint::convert(kpts, pts);
+  return camera_calib.at(cam_id)->undistort_cv(pts);
+}
+
 void TrackBase::change_feat_id(size_t id_old, size_t id_new) {
 
   // If found in db then replace
