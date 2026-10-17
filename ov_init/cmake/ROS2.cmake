@@ -49,19 +49,19 @@ target_compile_definitions(ov_init_lib PUBLIC ROS_AVAILABLE=2)
 target_link_libraries(ov_init_lib PUBLIC ov_core::ov_core_lib Ceres::ceres ${thirdparty_libraries})
 target_include_directories(ov_init_lib PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 install(TARGETS ov_init_lib
         EXPORT export_ov_init
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
-        PUBLIC_HEADER DESTINATION include
+        PUBLIC_HEADER DESTINATION include/${PROJECT_NAME}
 )
 install(DIRECTORY src/
-        DESTINATION include
+        DESTINATION include/${PROJECT_NAME}
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
-ament_export_include_directories(include)
+ament_export_include_directories(include/${PROJECT_NAME})
 ament_export_libraries(ov_init_lib)
 ament_export_targets(export_ov_init HAS_LIBRARY_TARGET)
 ament_export_dependencies(ov_core Ceres)
