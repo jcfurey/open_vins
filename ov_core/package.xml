@@ -18,7 +18,7 @@
     <maintainer email="pgeneva@udel.edu">Patrick Geneva</maintainer>
 
     <!-- Licensing -->
-    <license>GNU General Public License v3.0</license>
+    <license>GPL-3.0-or-later</license>
 
     <!-- ROS1: Dependencies needed to compile this package. -->
     <buildtool_depend condition="$ROS_VERSION == 1">catkin</buildtool_depend>
