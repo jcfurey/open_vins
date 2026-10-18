@@ -56,25 +56,17 @@ void TrackKLT::feed_new_camera(const CameraData &message) {
     std::lock_guard<std::mutex> lck(mtx_feeds.at(cam_id));
 
     // Histogram equalize
-    cv::Mat img;
+    cv::Mat &img = img_curr.at(cam_id);
     if (histogram_method == HistogramMethod::HISTOGRAM) {
       cv::equalizeHist(message.images.at(msg_id), img);
     } else if (histogram_method == HistogramMethod::CLAHE) {
-      double eq_clip_limit = 10.0;
-      cv::Size eq_win_size = cv::Size(8, 8);
-      cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(eq_clip_limit, eq_win_size);
-      clahe->apply(message.images.at(msg_id), img);
+      clahe.at(cam_id)->apply(message.images.at(msg_id), img);
     } else {
       img = message.images.at(msg_id);
     }
 
     // Extract image pyramid
-    std::vector<cv::Mat> imgpyr;
-    cv::buildOpticalFlowPyramid(img, imgpyr, win_size, pyr_levels);
-
-    // Save!
-    img_curr[cam_id] = img;
-    img_pyramid_curr[cam_id] = imgpyr;
+    cv::buildOpticalFlowPyramid(img, img_pyramid_curr.at(cam_id), win_size, pyr_levels);
   }
 
   // Either call our stereo or monocular version
@@ -190,8 +182,8 @@ void TrackKLT::commit_monocular(const CameraData &message, MonocularTrack &track
 
   // Move forward in time
   std::lock_guard<std::mutex> lckv(mtx_last_vars);
-  img_last.at(cam_id) = track.img;
-  img_pyramid_last.at(cam_id) = track.imgpyr;
+  std::swap(img_last.at(cam_id), img_curr.at(cam_id));
+  img_pyramid_last.at(cam_id).swap(img_pyramid_curr.at(cam_id));
   img_mask_last.at(cam_id) = track.mask;
   pts_last.at(cam_id) = track.pts;
   ids_last.at(cam_id) = track.ids;
@@ -224,10 +216,10 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
                              good_ids_left, good_ids_right);
     // Save the current image and pyramid
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id_left] = img_left;
-    img_last[cam_id_right] = img_right;
-    img_pyramid_last[cam_id_left] = imgpyr_left;
-    img_pyramid_last[cam_id_right] = imgpyr_right;
+    std::swap(img_last.at(cam_id_left), img_curr.at(cam_id_left));
+    std::swap(img_last.at(cam_id_right), img_curr.at(cam_id_right));
+    img_pyramid_last.at(cam_id_left).swap(img_pyramid_curr.at(cam_id_left));
+    img_pyramid_last.at(cam_id_right).swap(img_pyramid_curr.at(cam_id_right));
     img_mask_last[cam_id_left] = mask_left;
     img_mask_last[cam_id_right] = mask_right;
     pts_last[cam_id_left] = good_left;
@@ -282,10 +274,10 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   // If any of our masks are empty, that means we didn't have enough to do ransac, so just return
   if (mask_ll.empty() && mask_rr.empty()) {
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id_left] = img_left;
-    img_last[cam_id_right] = img_right;
-    img_pyramid_last[cam_id_left] = imgpyr_left;
-    img_pyramid_last[cam_id_right] = imgpyr_right;
+    std::swap(img_last.at(cam_id_left), img_curr.at(cam_id_left));
+    std::swap(img_last.at(cam_id_right), img_curr.at(cam_id_right));
+    img_pyramid_last.at(cam_id_left).swap(img_pyramid_curr.at(cam_id_left));
+    img_pyramid_last.at(cam_id_right).swap(img_pyramid_curr.at(cam_id_right));
     img_mask_last[cam_id_left] = mask_left;
     img_mask_last[cam_id_right] = mask_right;
     pts_last[cam_id_left].clear();
@@ -370,10 +362,10 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   // Move forward in time
   {
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    img_last[cam_id_left] = img_left;
-    img_last[cam_id_right] = img_right;
-    img_pyramid_last[cam_id_left] = imgpyr_left;
-    img_pyramid_last[cam_id_right] = imgpyr_right;
+    std::swap(img_last.at(cam_id_left), img_curr.at(cam_id_left));
+    std::swap(img_last.at(cam_id_right), img_curr.at(cam_id_right));
+    img_pyramid_last.at(cam_id_left).swap(img_pyramid_curr.at(cam_id_left));
+    img_pyramid_last.at(cam_id_right).swap(img_pyramid_curr.at(cam_id_right));
     img_mask_last[cam_id_left] = mask_left;
     img_mask_last[cam_id_right] = mask_right;
     pts_last[cam_id_left] = good_left;

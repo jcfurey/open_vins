@@ -16,7 +16,7 @@ import time
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry, Path as RosPath
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from tf2_msgs.msg import TFMessage
 
@@ -26,6 +26,7 @@ parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--camera-width', type=int, default=752)
 parser.add_argument('--camera-height', type=int, default=480)
 parser.add_argument('--image-reliability', choices=['reliable','best_effort'], default='reliable')
+parser.add_argument('--calibration-tf', choices=['static', 'dynamic'], default='static')
 args = parser.parse_args()
 if args.camera_width <= 0 or args.camera_height <= 0:
     parser.error('camera dimensions must be positive')
@@ -35,6 +36,10 @@ image_qos = QoSProfile(depth=10, reliability=(ReliabilityPolicy.RELIABLE if args
                                            else ReliabilityPolicy.BEST_EFFORT))
 counts = dict(pose=0, odometry=0, path=0, image=0, points=0, tf=0,
               loop_pose=0, intrinsics=0, depth=0, depth_color=0)
+if args.calibration_tf == 'static':
+    counts.update(tf_static=0, tf_static_late=0)
+camera_frames = set()
+late_camera_frames = set()
 errors = []
 last = {}
 first = {}
@@ -103,7 +108,21 @@ def transforms(message):
         if transform.child_frame_id == 'audit_imu':
             header(transform, 'tf')
         elif transform.child_frame_id.startswith('audit_cam'):
+            check(args.calibration_tf == 'dynamic', 'fixed camera calibration was sent on /tf')
             check(transform.header.frame_id == 'audit_imu', 'camera tf: parent frame mismatch')
+            camera_frames.add(transform.child_frame_id)
+
+def static_transforms(message, late=False):
+    check(args.calibration_tf == 'static', 'estimated camera calibration was sent on /tf_static')
+    for transform in message.transforms:
+        check(transform.child_frame_id in ('audit_cam0', 'audit_cam1'), 'static tf: unexpected child frame')
+        check(transform.header.frame_id == 'audit_imu', 'static tf: unexpected parent frame')
+        q = transform.transform.rotation
+        t = transform.transform.translation
+        check(all(math.isfinite(v) for v in (q.x, q.y, q.z, q.w, t.x, t.y, t.z)), 'static tf: nonfinite transform')
+        check(abs(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w - 1) < 1e-6, 'static tf: invalid rotation')
+        (late_camera_frames if late else camera_frames).add(transform.child_frame_id)
+        counts['tf_static_late' if late else 'tf_static'] = counts.get('tf_static_late' if late else 'tf_static', 0) + 1
 
 subscriptions = [
     node.create_subscription(Odometry, '/loop_pose', loop_pose, 10),
@@ -116,12 +135,26 @@ subscriptions = [
     node.create_subscription(Image, '/trackhist', lambda m: header(m, 'image', 'audit_cam0'), image_qos),
     node.create_subscription(PointCloud2, '/points_msckf', lambda m: header(m, 'points'), qos_profile_sensor_data),
     node.create_subscription(TFMessage, '/tf', transforms, qos_profile_sensor_data),
+    node.create_subscription(TFMessage, '/tf_static', static_transforms,
+                             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)),
 ]
 deadline = time.monotonic() + args.seconds
+late_subscription = None
+first_static_time = None
 while time.monotonic() < deadline:
     rclpy.spin_once(node, timeout_sec=0.05)
+    if args.calibration_tf == 'static' and counts['tf_static'] and first_static_time is None:
+        first_static_time = time.monotonic()
+    if first_static_time is not None and late_subscription is None and time.monotonic() - first_static_time > 1:
+        late_subscription = node.create_subscription(
+            TFMessage, '/tf_static', lambda m: static_transforms(m, True),
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
 node.destroy_node()
 rclpy.shutdown()
+check(camera_frames == {'audit_cam0', 'audit_cam1'}, 'camera TF tree is incomplete')
+if args.calibration_tf == 'static':
+    check(late_camera_frames == camera_frames, 'late subscriber did not receive retained calibration')
+    check(counts['tf_static'] == 2, 'fixed calibration was republished during the audit')
 for kind, count in counts.items():
     check(count > 0, 'No output received for ' + kind)
 if counts['image'] > 1:

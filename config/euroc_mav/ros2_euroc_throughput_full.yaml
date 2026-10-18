@@ -1,4 +1,5 @@
-# EuRoC replay throughput preset, frozen from the accuracy/ingestion study.
+# EuRoC replay throughput default, retained through the tracking/ROS 2 refinement.
+# ros2_euroc_accuracy.yaml provides the separately verified denser accuracy option.
 # Sensor timestamps remain 20 Hz; config/ros2_high_rate.yaml raises the ceiling for faster live sensors.
 /**:
   ros__parameters:
@@ -13,6 +14,8 @@
     init_dyn_use: true
     init_dyn_mle_max_threads: 1
     num_pts: 300
+    klt_pyramid_levels: 5
+    klt_window_size: 15
     num_opencv_threads: 2
     use_sim_time: true
     executor_threads: 1

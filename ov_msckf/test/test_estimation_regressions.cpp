@@ -132,6 +132,8 @@ TEST(ActiveStereoTracks, DisabledOutputsReleaseHistoryAndSupportALateConsumer) {
 
 TEST(Ros2ResetCalibration, RestoresIndependentCameraModelsAcrossRepeatedEpochs) {
   auto original = stereo_options();
+  original.klt_pyramid_levels = 3;
+  original.klt_window_size = 11;
   auto fisheye = std::make_shared<ov_core::CamEqui>(320, 240);
   fisheye->set_value(original.camera_intrinsics.at(1)->get_value());
   original.camera_intrinsics[1] = original.init_options.camera_intrinsics[1] = fisheye;
@@ -142,6 +144,8 @@ TEST(Ros2ResetCalibration, RestoresIndependentCameraModelsAcrossRepeatedEpochs) 
   EXPECT_DOUBLE_EQ(snapshot.camera_intrinsics.at(0)->get_value()(0), 200);
   for (int epoch = 0; epoch < 3; ++epoch) {
     auto options = copy_ros2_reset_options(snapshot);
+    EXPECT_EQ(options.klt_pyramid_levels, 3);
+    EXPECT_EQ(options.klt_window_size, 11);
     EXPECT_TRUE(std::dynamic_pointer_cast<ov_core::CamEqui>(options.camera_intrinsics.at(1)));
     EXPECT_DOUBLE_EQ(options.camera_intrinsics.at(0)->get_value()(0), 200);
     options.camera_intrinsics.at(0)->set_value(changed);

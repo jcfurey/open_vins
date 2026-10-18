@@ -1,7 +1,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
@@ -96,6 +96,10 @@ def launch_setup(context):
         namespace=LaunchConfiguration("namespace"),
         output='screen',
         parameters=parameters,
+        additional_env={
+            "OMP_NUM_THREADS": EnvironmentVariable("OMP_NUM_THREADS", default_value="1"),
+            "OPENBLAS_NUM_THREADS": EnvironmentVariable("OPENBLAS_NUM_THREADS", default_value="1"),
+        },
     )
 
     node2 = Node(

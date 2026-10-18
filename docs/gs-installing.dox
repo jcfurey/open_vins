@@ -123,6 +123,14 @@ Configure these with `catkin build -D<option_name>=OFF` or `cmake -D<option_name
 - `BUILD_OV_EVAL` - (default ON) - Enable or disable building of ov_eval
 - `DISABLE_MATPLOTLIB` - (default OFF) - Disable or enable matplotlib plot scripts in ov_eval
 
+For ROS 2, the three runtime packages also provide:
+
+- `BUILD_OV_EXAMPLES` - (default OFF) - Build and install the webcam, profiling and simulation examples. This is independent of `BUILD_TESTING`.
+- `BUILD_OV_ROS2_REPLAY` - (default ON) - Build `ros2_serial_msckf`. Disable it for a live-only deployment; the CMake configure step then does not require `rosbag2_cpp` or `rosbag2_storage`. The package manifest retains those dependencies for the default build.
+
+The live node and ASL file replay remain available without the examples. Enable examples explicitly with `--cmake-args -DBUILD_OV_EXAMPLES=ON`.
+Use a fresh install prefix when switching to a smaller build; CMake does not uninstall executables left by a previous configuration.
+
 @code{.shell-session}
 mkdir -p ~/workspace/catkin_ws_ov/src/
 cd ~/workspace/catkin_ws_ov/src/

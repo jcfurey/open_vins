@@ -11,7 +11,7 @@ option(ENABLE_ROS "Enable or disable building with ROS (if it is found)" ON)
 if (NOT ENABLE_ROS)
     message(FATAL_ERROR "Build with ROS1.cmake if you don't have ROS.")
 endif ()
-add_definitions(-DROS_AVAILABLE=2)
+option(BUILD_OV_EXAMPLES "Build OpenVINS webcam, profiling and simulation examples" OFF)
 
 # Include our header files
 include_directories(
@@ -70,17 +70,13 @@ ament_export_dependencies(ov_core Ceres)
 # Make binary files!
 ##################################################
 
-add_executable(test_simulation src/test_simulation.cpp)
-target_link_libraries(test_simulation ov_init_lib ${thirdparty_libraries})
-install(TARGETS test_simulation DESTINATION lib/${PROJECT_NAME})
-
-add_executable(test_dynamic_mle src/test_dynamic_mle.cpp)
-target_link_libraries(test_dynamic_mle ov_init_lib ${thirdparty_libraries})
-install(TARGETS test_dynamic_mle DESTINATION lib/${PROJECT_NAME})
-
-add_executable(test_dynamic_init src/test_dynamic_init.cpp)
-target_link_libraries(test_dynamic_init ov_init_lib ${thirdparty_libraries})
-install(TARGETS test_dynamic_init DESTINATION lib/${PROJECT_NAME})
+if(BUILD_OV_EXAMPLES)
+    foreach(example test_simulation test_dynamic_mle test_dynamic_init)
+        add_executable(${example} src/${example}.cpp)
+        target_link_libraries(${example} ov_init_lib ${thirdparty_libraries})
+        install(TARGETS ${example} DESTINATION lib/${PROJECT_NAME})
+    endforeach()
+endif()
 
 # Install launch and config directories
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch/)

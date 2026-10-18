@@ -23,6 +23,7 @@
 #define OV_CORE_TRACK_KLT_H
 
 #include "TrackBase.h"
+#include <stdexcept>
 
 namespace ov_core {
 
@@ -50,15 +51,22 @@ public:
    * @param gridx size of grid in the x-direction / u-direction
    * @param gridy size of grid in the y-direction / v-direction
    * @param minpxdist features need to be at least this number pixels away from each other
+   * @param pyramid_levels maximum optical-flow pyramid level (zero tracks at the original resolution)
+   * @param window_size odd optical-flow patch width in pixels
    */
   explicit TrackKLT(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numfeats, int numaruco, bool stereo,
-                    HistogramMethod histmethod, int fast_threshold, int gridx, int gridy, int minpxdist)
+                    HistogramMethod histmethod, int fast_threshold, int gridx, int gridy, int minpxdist,
+                    int pyramid_levels = 5, int window_size = 15)
       : TrackBase(cameras, numfeats, numaruco, stereo, histmethod), threshold(fast_threshold), grid_x(gridx), grid_y(gridy),
-        min_px_dist(minpxdist) {
+        min_px_dist(minpxdist), pyr_levels(pyramid_levels), win_size(window_size, window_size) {
+    if (pyramid_levels < 0 || pyramid_levels > 8 || window_size < 3 || window_size > 63 || window_size % 2 == 0)
+      throw std::invalid_argument("KLT pyramid level must be 0..8 and window width must be odd, 3..63 pixels");
     for (const auto &camera : camera_calib) {
       img_pyramid_last[camera.first];
       img_curr[camera.first];
       img_pyramid_curr[camera.first];
+      if (histmethod == HistogramMethod::CLAHE)
+        clahe[camera.first] = cv::createCLAHE(10.0, cv::Size(8, 8));
     }
   }
 
@@ -167,10 +175,12 @@ protected:
   int pyr_levels = 5;
   cv::Size win_size = cv::Size(15, 15);
 
-  // Last set of image pyramids
+  // Two independent image/pyramid buffers per camera, swapped after tracking.
+  // Never overwrite the previous frame while optical flow still references it.
   std::map<size_t, std::vector<cv::Mat>> img_pyramid_last;
   std::map<size_t, cv::Mat> img_curr;
   std::map<size_t, std::vector<cv::Mat>> img_pyramid_curr;
+  std::map<size_t, cv::Ptr<cv::CLAHE>> clahe;
 };
 
 } // namespace ov_core

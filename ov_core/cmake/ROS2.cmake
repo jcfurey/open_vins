@@ -11,7 +11,7 @@ option(ENABLE_ROS "Enable or disable building with ROS (if it is found)" ON)
 if (NOT ENABLE_ROS)
     message(FATAL_ERROR "Build with ROS1.cmake if you don't have ROS.")
 endif ()
-add_definitions(-DROS_AVAILABLE=2)
+option(BUILD_OV_EXAMPLES "Build OpenVINS webcam, profiling and simulation examples" OFF)
 
 # Include our header files
 include_directories(
@@ -48,7 +48,7 @@ list(APPEND LIBRARY_SOURCES
 )
 file(GLOB_RECURSE LIBRARY_HEADERS "src/*.h")
 add_library(ov_core_lib SHARED ${LIBRARY_SOURCES} ${LIBRARY_HEADERS})
-target_compile_definitions(ov_core_lib PUBLIC ROS_AVAILABLE=2)
+target_compile_definitions(ov_core_lib PUBLIC ROS_AVAILABLE=2 ENABLE_ARUCO_TAGS=$<BOOL:${ENABLE_ARUCO_TAGS}>)
 target_link_libraries(ov_core_lib PUBLIC rclcpp::rclcpp ${rcl_interfaces_TARGETS} cv_bridge::cv_bridge Eigen3::Eigen ${thirdparty_libraries})
 target_include_directories(ov_core_lib PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
@@ -79,13 +79,13 @@ ament_export_dependencies(Eigen3 OpenCV rclcpp rcl_interfaces cv_bridge)
 #    target_link_libraries(test_tracking ov_core_lib ${thirdparty_libraries})
 #endif ()
 
-add_executable(test_webcam src/test_webcam.cpp)
-target_link_libraries(test_webcam ov_core_lib ${thirdparty_libraries})
-install(TARGETS test_webcam DESTINATION lib/${PROJECT_NAME})
-
-add_executable(test_profile src/test_profile.cpp)
-target_link_libraries(test_profile ov_core_lib ${thirdparty_libraries})
-install(TARGETS test_profile DESTINATION lib/${PROJECT_NAME})
+if(BUILD_OV_EXAMPLES)
+    add_executable(test_webcam src/test_webcam.cpp)
+    target_link_libraries(test_webcam ov_core_lib ${thirdparty_libraries})
+    add_executable(test_profile src/test_profile.cpp)
+    target_link_libraries(test_profile ov_core_lib ${thirdparty_libraries})
+    install(TARGETS test_webcam test_profile DESTINATION lib/${PROJECT_NAME})
+endif()
 
 if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
@@ -97,6 +97,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_dataset_reader ov_core_lib)
     ament_add_gtest(test_camera_models test/test_camera_models.cpp)
     target_link_libraries(test_camera_models ov_core_lib)
+    ament_add_gtest(test_klt_buffers test/test_klt_buffers.cpp)
+    target_link_libraries(test_klt_buffers ov_core_lib)
 endif()
 
 # finally define this as the package

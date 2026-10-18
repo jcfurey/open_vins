@@ -32,12 +32,18 @@ jobs:
         run: |
           source /opt/ros/${{ matrix.distro }}/setup.bash
           MAKEFLAGS=-j2 colcon build --event-handlers console_cohesion+ \
-            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DDISABLE_MATPLOTLIB=ON
+            --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DBUILD_OV_EXAMPLES=ON -DDISABLE_MATPLOTLIB=ON
       - name: Unit Tests
         run: |
           source install/setup.bash
           colcon test --packages-select ov_core ov_init ov_msckf --event-handlers console_cohesion+
           colcon test-result --verbose
+      - name: Installed CMake Consumer
+        run: |
+          source install/setup.bash
+          cmake -S src/open_vins/ov_msckf/test/installed_consumer -B installed-consumer -DCMAKE_BUILD_TYPE=Release
+          cmake --build installed-consumer --parallel 2
+          installed-consumer/open_vins_installed_consumer
       - name: Simulation Accuracy
         run: |
           source install/setup.bash

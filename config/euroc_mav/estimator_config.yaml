@@ -84,6 +84,8 @@ fast_threshold: 20 # threshold for fast extraction (warning: lower threshs can b
 grid_x: 5 # extraction sub-grid count for horizontal direction (uniform tracking)
 grid_y: 5 # extraction sub-grid count for vertical direction (uniform tracking)
 min_px_dist: 10 # distance between features (features near each other provide less information)
+klt_pyramid_levels: 5 # maximum optical-flow pyramid level (0..8)
+klt_window_size: 15 # odd optical-flow patch width in processed pixels (3..63)
 knn_ratio: 0.70 # descriptor knn threshold for the top two descriptor matches
 track_frequency: 21.0 # frequency we will perform feature tracking at (in frames per second / hertz)
 downsample_cameras: false # will downsample image in half if true

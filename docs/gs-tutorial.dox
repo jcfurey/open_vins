@@ -191,9 +191,24 @@ scene-processing capacity; use the actual rig's calibration and measure both.
 The ROS 2 node has two callback-executor threads and one estimator worker by default.
 The EuRoC bag profile uses one callback thread, since these callbacks only enqueue measurements.
 `executor_threads` and `num_opencv_threads` control separate pools; the latter is a process-wide OpenCV setting.
+The ROS 2 launchers default OpenMP and OpenBLAS to one worker for the estimator process.
+Existing `OMP_NUM_THREADS` and `OPENBLAS_NUM_THREADS` environment settings take precedence.
 Serial runners skip auxiliary loop-closure triangulation when visualization is disabled.
 The live node builds that output when a consumer connects; auxiliary history starts with subsequent observations.
 Image buffers remain owned copies because trackers can retain them after the ROS callback returns.
+The KLT tracker keeps independent previous/current pyramids and reuses their storage after tracking completes.
+`klt_pyramid_levels` sets the maximum optical-flow level (0--8, default 5); level 0 is the processed image.
+`klt_window_size` sets the odd optical-flow patch width (3--63 processed pixels, default 15).
+OpenCV may build fewer levels when the image becomes too small for the patch.
+Shallower pyramids and smaller patches can reduce tracking cost but also change the motion and texture that can be tracked.
+These are read-only startup parameters; measure trajectory accuracy and complete ingestion before deploying a change.
+Fixed IMU-to-camera extrinsics are published once on retained `/tf_static`, so late TF listeners receive them.
+When `calib_cam_extrinsics` is enabled, the changing camera transforms remain on `/tf`.
+The global-to-IMU transform remains dynamic. `publish_calibration_tf` and `publish_global_to_imu_tf` control these outputs.
+Fast odometry prediction runs when odometry or dynamic TF has a matching consumer.
+TF publisher-match events follow topic remappings, and late consumers start receiving predictions automatically.
+Fixed camera calibration remains available on retained `/tf_static` without running fast prediction.
+The shutdown summary reports `ROS2 outputs: fast_odometry=...` for resource audits.
 
 Camera queue overflow now requests a counted estimator reset, as does a gap between processed
 camera packets exceeding `max_camera_gap_seconds` (default 1.0 s). Fresh IMU coverage is required

@@ -44,6 +44,7 @@
 #include <tf2/transform_datatypes.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/transform_broadcaster.hpp>
+#include <tf2_ros/static_transform_broadcaster.hpp>
 
 #include <atomic>
 #include <fstream>
@@ -176,6 +177,10 @@ protected:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_loop_point;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr pub_loop_intrinsics;
   std::shared_ptr<tf2_ros::TransformBroadcaster> mTfBr;
+  std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster;
+  bool static_calibration_published = false;
+  std::shared_ptr<std::atomic<bool>> tf_subscribers = std::make_shared<std::atomic<bool>>(false);
+  size_t fast_odometry_updates = 0;
 
   // Our subscribers and camera synchronizers
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;

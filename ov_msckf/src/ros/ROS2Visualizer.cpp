@@ -22,6 +22,8 @@
 #include "ROS2Visualizer.h"
 #include "Ros2ResetOptions.h"
 
+#include <type_traits>
+
 #include "core/VioManager.h"
 #include "ros/ROSVisualizerHelper.h"
 #include "ros/Ros2Compat.h"
@@ -41,6 +43,21 @@ using namespace ov_type;
 using namespace ov_msckf;
 
 namespace {
+template <typename Broadcaster, typename = void> struct HasTfNodeInterfaces : std::false_type {};
+template <typename Broadcaster>
+struct HasTfNodeInterfaces<Broadcaster, std::void_t<typename Broadcaster::RequiredInterfaces>> : std::true_type {};
+
+template <typename Broadcaster>
+std::shared_ptr<Broadcaster> make_tf_broadcaster(const std::shared_ptr<rclcpp::Node> &node, const rclcpp::QoS &qos,
+                                                const rclcpp::PublisherOptions &options) {
+  if constexpr (HasTfNodeInterfaces<Broadcaster>::value) {
+    return std::make_shared<Broadcaster>(
+        typename Broadcaster::RequiredInterfaces(node->get_node_parameters_interface(), node->get_node_topics_interface()), qos, options);
+  } else {
+    return std::make_shared<Broadcaster>(node, qos, options);
+  }
+}
+
 double sensor_time(const builtin_interfaces::msg::Time &stamp) {
   if (stamp.sec < 0 || stamp.nanosec >= 1000000000U)
     return std::numeric_limits<double>::quiet_NaN();
@@ -119,7 +136,19 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_p
     image_sizes.emplace(mask.first, mask.second.size());
 
   // Setup our transform broadcaster
-  mTfBr = std::make_shared<tf2_ros::TransformBroadcaster>(node);
+  rclcpp::PublisherOptions tf_options;
+  tf_options.qos_overriding_options = rclcpp::QosOverridingOptions{
+      rclcpp::QosPolicyKind::Depth, rclcpp::QosPolicyKind::Durability, rclcpp::QosPolicyKind::History, rclcpp::QosPolicyKind::Reliability};
+  // Capture the status storage independently of this object's lifetime.
+  const auto tf_interest = tf_subscribers;
+  tf_options.event_callbacks.matched_callback = [tf_interest](rclcpp::MatchedInfo &status) {
+    tf_interest->store(status.current_count > 0, std::memory_order_relaxed);
+  };
+  mTfBr = make_tf_broadcaster<tf2_ros::TransformBroadcaster>(node, tf2_ros::DynamicBroadcasterQoS(), tf_options);
+  rclcpp::PublisherOptions static_tf_options;
+  static_tf_options.qos_overriding_options = rclcpp::QosOverridingOptions{
+      rclcpp::QosPolicyKind::Depth, rclcpp::QosPolicyKind::History, rclcpp::QosPolicyKind::Reliability};
+  static_tf_broadcaster = make_tf_broadcaster<tf2_ros::StaticTransformBroadcaster>(node, tf2_ros::StaticBroadcasterQoS(), static_tf_options);
 
   // Setup pose and path publisher
   pub_poseimu = node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("poseimu", 2);
@@ -221,6 +250,8 @@ void ROS2Visualizer::stop() {
               "rate_limited=%lu peak_imu=%zu peak_cameras=%zu resets=%lu",
               stats.imu_accepted, stats.cameras_accepted, stats.imu_dropped, stats.cameras_dropped, stats.invalid, stats.out_of_order,
               stats.rate_limited, stats.imu_peak, stats.camera_peak, stats.resets);
+  RCLCPP_INFO(_node->get_logger(), "ROS2 outputs: fast_odometry=%zu tf_subscribers=%d", fast_odometry_updates,
+              static_cast<int>(tf_subscribers->load(std::memory_order_relaxed)));
 }
 
 void ROS2Visualizer::reset_estimator() {
@@ -232,6 +263,7 @@ void ROS2Visualizer::reset_estimator() {
   poses_imu.clear();
   poses_gt.clear();
   last_camera_time = last_odometry_time = -1.0;
+  static_calibration_published = false;
   last_visualization_timestamp = last_visualization_timestamp_image = -1.0;
   start_time_set = false;
 }
@@ -408,22 +440,51 @@ void ROS2Visualizer::visualize_odometry(double timestamp) {
   if (!_app->initialized() || (timestamp - _app->initialized_time()) < 1)
     return;
 
-  if (odometry_publish_rate == 0 || (pub_odomimu->get_subscription_count() == 0 && !publish_global2imu_tf && !publish_calibration_tf))
+  if (odometry_publish_rate == 0)
+    return;
+  const auto state = _app->get_state();
+  const bool dynamic_calibration = state->_options.do_calib_camera_pose;
+  const bool tf_requested = tf_subscribers->load(std::memory_order_relaxed);
+  const bool odometry_requested = pub_odomimu->get_subscription_count() != 0;
+  const bool global_tf_requested = publish_global2imu_tf && tf_requested;
+  const bool dynamic_calibration_requested = publish_calibration_tf && dynamic_calibration && tf_requested;
+
+  auto publish_camera_calibration = [&](bool dynamic) {
+    std::vector<geometry_msgs::msg::TransformStamped> transforms;
+    transforms.reserve(state->_calib_IMUtoCAM.size());
+    for (const auto &calib : state->_calib_IMUtoCAM) {
+      auto trans_calib = ROSVisualizerHelper::get_stamped_transform_from_pose(_node, calib.second, true);
+      trans_calib.header.stamp = ROSVisualizerHelper::get_time_from_seconds(timestamp);
+      trans_calib.header.frame_id = imu_frame;
+      trans_calib.child_frame_id = camera_frame_prefix + std::to_string(calib.first);
+      transforms.push_back(std::move(trans_calib));
+    }
+    if (dynamic)
+      mTfBr->sendTransform(transforms);
+    else
+      static_tf_broadcaster->sendTransform(transforms);
+  };
+  // Fixed calibration needs no state prediction, and must remain available to late listeners.
+  if (publish_calibration_tf && !dynamic_calibration && !static_calibration_published) {
+    publish_camera_calibration(false);
+    static_calibration_published = true;
+  }
+  if (!odometry_requested && !global_tf_requested && !dynamic_calibration_requested)
     return;
   if (last_odometry_time >= 0 && timestamp - last_odometry_time < 1.0 / odometry_publish_rate - 1e-6)
     return;
 
   // Get fast propagate state at the desired timestamp
-  std::shared_ptr<State> state = _app->get_state();
   Eigen::Matrix<double, 13, 1> state_plus = Eigen::Matrix<double, 13, 1>::Zero();
   Eigen::Matrix<double, 12, 12> cov_plus = Eigen::Matrix<double, 12, 12>::Zero();
   if (!_app->get_propagator()->fast_state_propagate(state, timestamp, state_plus, cov_plus))
     return;
+  ++fast_odometry_updates;
 
   last_odometry_time = timestamp;
 
   // Publish our odometry message if requested
-  if (pub_odomimu->get_subscription_count() != 0) {
+  if (odometry_requested) {
 
     // Our odometry message
     nav_msgs::msg::Odometry odomIinM;
@@ -470,26 +531,18 @@ void ROS2Visualizer::visualize_odometry(double timestamp) {
   // Publish our transform on TF
   // NOTE: since we use JPL we have an implicit conversion to Hamilton when we publish
   // NOTE: a rotation from GtoI in JPL has the same xyzw as a ItoG Hamilton rotation
-  auto odom_pose = std::make_shared<ov_type::PoseJPL>();
-  odom_pose->set_value(state_plus.block(0, 0, 7, 1));
-  geometry_msgs::msg::TransformStamped trans = ROSVisualizerHelper::get_stamped_transform_from_pose(_node, odom_pose, false);
-  trans.header.stamp = ROSVisualizerHelper::get_time_from_seconds(timestamp);
-  trans.header.frame_id = global_frame;
-  trans.child_frame_id = imu_frame;
-  if (publish_global2imu_tf) {
+  if (global_tf_requested) {
+    auto odom_pose = std::make_shared<ov_type::PoseJPL>();
+    odom_pose->set_value(state_plus.block(0, 0, 7, 1));
+    geometry_msgs::msg::TransformStamped trans = ROSVisualizerHelper::get_stamped_transform_from_pose(_node, odom_pose, false);
+    trans.header.stamp = ROSVisualizerHelper::get_time_from_seconds(timestamp);
+    trans.header.frame_id = global_frame;
+    trans.child_frame_id = imu_frame;
     mTfBr->sendTransform(trans);
   }
 
-  // Loop through each camera calibration and publish it
-  for (const auto &calib : state->_calib_IMUtoCAM) {
-    geometry_msgs::msg::TransformStamped trans_calib = ROSVisualizerHelper::get_stamped_transform_from_pose(_node, calib.second, true);
-    trans_calib.header.stamp = ROSVisualizerHelper::get_time_from_seconds(timestamp);
-    trans_calib.header.frame_id = imu_frame;
-    trans_calib.child_frame_id = camera_frame_prefix + std::to_string(calib.first);
-    if (publish_calibration_tf) {
-      mTfBr->sendTransform(trans_calib);
-    }
-  }
+  if (dynamic_calibration_requested)
+    publish_camera_calibration(true);
 }
 
 void ROS2Visualizer::visualize_final() {

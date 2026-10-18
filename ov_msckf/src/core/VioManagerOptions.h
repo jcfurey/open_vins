@@ -457,6 +457,12 @@ struct VioManagerOptions {
   /// Will check after doing KLT track and remove any features closer than this
   int min_px_dist = 10;
 
+  /// Maximum optical-flow pyramid level (levels 0 through this value are used).
+  int klt_pyramid_levels = 5;
+
+  /// Odd optical-flow patch width in processed-image pixels.
+  int klt_window_size = 15;
+
   /// What type of pre-processing histogram method should be applied to images
   ov_core::TrackBase::HistogramMethod histogram_method = ov_core::TrackBase::HistogramMethod::HISTOGRAM;
 
@@ -490,6 +496,8 @@ struct VioManagerOptions {
       parser->parse_config("grid_x", grid_x);
       parser->parse_config("grid_y", grid_y);
       parser->parse_config("min_px_dist", min_px_dist);
+      parser->parse_config("klt_pyramid_levels", klt_pyramid_levels, false);
+      parser->parse_config("klt_window_size", klt_window_size, false);
       std::string histogram_method_str = "HISTOGRAM";
       parser->parse_config("histogram_method", histogram_method_str);
       if (histogram_method_str == "NONE") {
@@ -521,6 +529,8 @@ struct VioManagerOptions {
     PRINT_DEBUG("  - fast threshold: %d\n", fast_threshold);
     PRINT_DEBUG("  - grid X by Y: %d by %d\n", grid_x, grid_y);
     PRINT_DEBUG("  - min px dist: %d\n", min_px_dist);
+    PRINT_DEBUG("  - KLT max pyramid level: %d\n", klt_pyramid_levels);
+    PRINT_DEBUG("  - KLT window width: %d\n", klt_window_size);
     PRINT_DEBUG("  - hist method: %d\n", (int)histogram_method);
     PRINT_DEBUG("  - knn ratio: %.3f\n", knn_ratio);
     PRINT_DEBUG("  - track frequency: %.1f\n", track_frequency);

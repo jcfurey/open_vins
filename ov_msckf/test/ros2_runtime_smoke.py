@@ -36,7 +36,8 @@ def main():
     command = [str(args.executable.resolve()), str(args.config.resolve()), "--ros-args",
                "-p", "verbosity:=SILENT", "-p", "topic_imu:=/ov_audit/imu",
                "-p", "topic_camera0:=/ov_audit/left", "-p", "topic_camera1:=/ov_audit/right",
-               "-p", "max_camera_queue_size:=3", "-p", "path_history_size:=5"]
+               "-p", "max_camera_queue_size:=3", "-p", "path_history_size:=5",
+               "-p", "klt_pyramid_levels:=3", "-p", "klt_window_size:=21"]
     if args.raw_only:
         for topic in ("trackhist", "loop_depth", "loop_depth_colored"):
             command += ["-p", topic + ".enable_pub_plugins:=[image_transport/raw]"]
@@ -91,8 +92,11 @@ def main():
                     assert endpoints[0].qos_profile.depth == 20
                 name = "qos_overrides./ov_audit/imu.subscription.reliability"
                 assert call(client.describe_parameters([name])).descriptors[0].read_only
-            description = call(client.describe_parameters(["max_camera_queue_size", "max_clones", "cam0_T_imu_cam"]))
+            description = call(client.describe_parameters(["max_camera_queue_size", "max_clones", "cam0_T_imu_cam",
+                                                          "klt_pyramid_levels", "klt_window_size"]))
             assert all(descriptor.read_only for descriptor in description.descriptors), description
+            flow = call(client.get_parameters(["klt_pyramid_levels", "klt_window_size"]))
+            assert [value.integer_value for value in flow.values] == [3, 21], flow
             result = call(client.set_parameters([Parameter("max_camera_queue_size", value=100)]))
             assert not result.results[0].successful, "Startup setting accepted an ineffective runtime change"
 

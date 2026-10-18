@@ -41,6 +41,13 @@ This builds all five packages: `ov_core`, `ov_data`, `ov_init`, `ov_msckf`, and
 `ov_eval`. The ROS 2 libraries export CMake targets and inherit the C++ standard
 required by the installed ROS distribution. Boost.System is header-only and
 does not require a separate library.
+Webcam, profiling and simulation tools are optional in ROS 2:
+`BUILD_OV_EXAMPLES` defaults to `OFF`, independently of `BUILD_TESTING`.
+`BUILD_OV_ROS2_REPLAY=OFF` also omits the rosbag2 serial tool and its CMake
+dependency discovery; live and ASL file input remain available. Use a fresh
+installation prefix when disabling targets to avoid stale installed binaries.
+Rebuild C++ dependents together with the libraries when adopting updated public
+tracker headers and layouts.
 
 Start the stereo estimator with the bundled EuRoC calibration:
 
@@ -52,9 +59,19 @@ The estimator waits for images and IMU messages on the topics specified in the
 configuration. Supply a calibrated configuration for your own sensors using
 `config_path:=/absolute/path/to/estimator_config.yaml`.
 
-Run the bundled simulation without a bag or camera:
+EuRoC replay presets live under `config/euroc_mav/`. Select
+`ros2_euroc_throughput_full.yaml` or `ros2_euroc_throughput_half.yaml` with the
+`ros_params_file` launch argument for the bounded replay settings. The optional
+`ros2_euroc_accuracy.yaml` uses denser tracking and KLT3/15 at higher CPU cost;
+it preserves the same calibration, noise and reliable transport bounds.
+
+To run the bundled simulation without a bag or camera, first enable examples:
 
 ```bash
+MAKEFLAGS='-j2 -l3' CMAKE_BUILD_PARALLEL_LEVEL=2 colcon build \
+  --base-paths src/open_vins --packages-select ov_core ov_init ov_msckf \
+  --executor sequential --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_OV_EXAMPLES=ON
+source install/setup.bash
 ros2 run ov_msckf run_simulation \
   "$PWD/src/open_vins/config/euroc_mav/estimator_config.yaml" \
   --ros-args \
@@ -76,6 +93,11 @@ off in this pipeline. OpenCV can still parallelize tracking internally.
 Fast odometry publishes at most once per consumed IMU batch; its configured
 rate is a ceiling, and image processing can reduce the output rate. Every
 accepted IMU sample still feeds the estimator.
+Fast prediction and dynamic TF serialization run only when odometry or TF
+consumers are present, including late subscribers on remapped topics. Fixed
+camera extrinsics are retained on `/tf_static`; online extrinsic calibration
+continues to publish dynamic transforms. Launch files default OpenMP/OpenBLAS
+workers to one while honoring explicit environment settings.
 When embedding the visualizer, stop and join the ROS executor before destroying
 it so message-filter input callbacks have finished; then stop the estimator
 worker. The installed executable performs this shutdown sequence.
@@ -130,6 +152,8 @@ The following settings supplement the estimator configuration:
 | `path_history_size` | `2000` | Maximum poses per published path; zero disables history |
 | `odometry_publish_rate` | `200.0` | Maximum fast odometry/TF rate, Hz; zero disables it |
 | `track_image_publish_rate` | `10.0` | Maximum diagnostic tracking image rate, Hz; zero disables it |
+| `klt_pyramid_levels` | `5` | Maximum optical-flow pyramid level, from 0 to 8 |
+| `klt_window_size` | `15` | Odd optical-flow patch width, from 3 to 63 pixels |
 | `max_imu_history_seconds` | `10.0` | Initialized estimator history limit without camera updates |
 | `reset_on_time_jump` | `true` | Reset on large backward IMU timestamp jumps |
 | `topic_imu`, `topic_camera0`, `topic_camera1`, ... | Calibration topics | Explicit sensor topic aliases |
@@ -164,6 +188,7 @@ ROS_DOMAIN_ID=126 python3 src/open_vins/ov_msckf/test/ros2_runtime_smoke.py \
 
 The C++ tests cover stereo exclusion masks and bearing accumulation, static
 startup policy and bias recovery, history trimming, late image consumers,
+reused KLT buffers versus fresh scratch storage through resets and configurable optical flow,
 independent reset calibration snapshots, IMU interval interpolation, missing
 coverage, nonzero clock offsets, covariance frame conversion, invalid EKF
 innovations, empty and populated PointCloud2 serialization, queue limits,
@@ -173,7 +198,15 @@ read-only parameters, camera overload, invalid IMU input, bag rewinds, and SIGIN
 `ov_msckf/test/ros2_euroc_output_smoke.py` additionally observes a live EuRoC
 replay; its module docstring lists the required frame and path overrides. It
 checks timestamps, frame IDs, finite covariances, path bounds, tracking image
-rate, depth/color image storage, and CameraInfo calibration fields.
+rate, depth/color image storage, CameraInfo calibration fields, and retained
+static camera transforms for late listeners. Use its `--calibration-tf dynamic`
+mode when testing online camera extrinsic calibration.
+`ov_msckf/test/ros2_demand_smoke.py` replays a short EuRoC segment twice to check
+zero fast predictions headless and returning TF/odometry for late consumers on
+remapped topics; run it with `--install`, `--bag`, and a fresh `--output` path.
+CI also configures `ov_msckf/test/installed_consumer` independently after
+installation, builds against only the exported CMake target, and runs KLT and
+enabled ArUco tracking to check transitive headers, feature flags and ABI.
 
 For memory checks, build a separate instrumented overlay and run the runtime
 test with leak checking enabled:
