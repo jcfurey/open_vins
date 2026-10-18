@@ -1,0 +1,38 @@
+# Optional denser EuRoC accuracy preset, verified on all 11 complete flights at 1x.
+# Mean ATE 7.174 cm versus 7.927 cm for ros2_euroc_accuracy.yaml; CPU 1.93x.
+# 600 tracked points total, 25 clones, 60 SLAM landmarks and 120 MSCKF features/update.
+# Same original initialization, calibration/noise policy and 64-pair transport bounds.
+# The <2 cm mean ATE target is not reached; faster replay capacity is unqualified.
+/**:
+  ros__parameters:
+    init_dyn_min_features: 25
+    init_dyn_mle_max_threads: 1
+    init_dyn_use: true
+    num_opencv_threads: 2
+    try_zupt: true
+    verbosity: INFO
+    zupt_only_at_beginning: true
+    use_sim_time: true
+    executor_threads: 1
+    qos_overrides./imu0.subscription.reliability: reliable
+    qos_overrides./imu0.subscription.depth: 1000
+    qos_overrides./cam0/image_raw.subscription.reliability: reliable
+    qos_overrides./cam0/image_raw.subscription.depth: 64
+    qos_overrides./cam1/image_raw.subscription.reliability: reliable
+    qos_overrides./cam1/image_raw.subscription.depth: 64
+    trackhist.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth_colored.enable_pub_plugins:
+    - image_transport/raw
+    calib_cam_extrinsics: false
+    calib_cam_timeoffset: false
+    max_slam: 60
+    max_msckf_in_update: 120
+    num_pts: 600
+    camera_qos_depth: 64
+    max_camera_queue_size: 64
+    max_clones: 25
+    klt_pyramid_levels: 3
+    klt_window_size: 15

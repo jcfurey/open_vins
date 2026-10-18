@@ -65,6 +65,15 @@ EuRoC replay presets live under `config/euroc_mav/`. Select
 `ros2_euroc_accuracy.yaml` uses denser tracking and KLT3/15 at higher CPU cost;
 it preserves the same calibration, noise and reliable transport bounds.
 
+`ros2_euroc_accuracy_dense.yaml` increases the budget to 600 tracked points,
+25 clones, 60 SLAM landmarks and 120 MSCKF features per update. In one complete
+11-flight EuRoC comparison at the original 20 Hz rate, mean position ATE changes
+from 7.927 to 7.174 cm, CPU from 279.47 to 539.42 core-s, and median peak PSS
+from 100.96 to 107.40 MiB. Worst-flight ATE increases from 16.083 to 16.980 cm.
+Use this optional dataset-tuned preset when its extra computation is acceptable;
+faster replay capacity is not qualified. It retains the original initialization,
+calibration/noise policy and bounded transport. The 2 cm mean ATE target is not reached.
+
 To run the bundled simulation without a bag or camera, first enable examples:
 
 ```bash
