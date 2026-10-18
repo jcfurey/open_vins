@@ -200,13 +200,19 @@ void VioManager::retriangulate_active_tracks(const ov_core::CameraData &message)
   assert(state->_clones_IMU.find(message.timestamp) != state->_clones_IMU.end());
   active_tracks_time = message.timestamp;
   active_image = cv::Mat();
+  active_tracks_posinG.clear();
+  active_tracks_uvd.clear();
+  if (!active_tracks_enabled) {
+    active_feat_linsys_A.clear();
+    active_feat_linsys_b.clear();
+    active_feat_linsys_count.clear();
+    return;
+  }
   if (active_image_enabled)
     trackFEATS->display_active(active_image, 255, 255, 255, 255, 255, 255, " ");
   if (!active_image.empty()) {
     active_image = active_image(cv::Rect(0, 0, message.images.at(0).cols, message.images.at(0).rows));
   }
-  active_tracks_posinG.clear();
-  active_tracks_uvd.clear();
 
   // Current active tracks in our frontend
   // TODO: should probably assert here that these are at the message time...

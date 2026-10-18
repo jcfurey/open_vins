@@ -1,0 +1,14 @@
+# ros2 bag play --qos-profile-overrides-path <this file>
+# Keep enough reliable writer history to retransmit IMUs during image bursts on WSL.
+/imu0:
+  reliability: reliable
+  history: keep_last
+  depth: 1000
+/cam0/image_raw:
+  reliability: reliable
+  history: keep_last
+  depth: 1000
+/cam1/image_raw:
+  reliability: reliable
+  history: keep_last
+  depth: 1000

@@ -1,0 +1,21 @@
+# Pass to subscribe.launch.py as ros_params_file when replaying reliable rosbag2 publishers.
+# Live drivers that offer best_effort should use the default SensorDataQoS instead.
+/**:
+  ros__parameters:
+    use_sim_time: true
+    executor_threads: 1 # callbacks enqueue; the estimator already has its own worker
+    max_camera_queue_size: 64 # bounded startup headroom for accelerated replay
+    camera_qos_depth: 64 # also bounds stereo synchronization history
+    qos_overrides:
+      /imu0:
+        subscription:
+          reliability: reliable
+          depth: 1000 # five seconds at EuRoC's 200 Hz, bounded for WSL playback bursts
+      /cam0/image_raw:
+        subscription:
+          reliability: reliable
+          depth: 64
+      /cam1/image_raw:
+        subscription:
+          reliability: reliable
+          depth: 64

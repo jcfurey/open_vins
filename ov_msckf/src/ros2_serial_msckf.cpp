@@ -141,6 +141,8 @@ int main(int argc, char **argv) {
       require_topic(camera.first, {"sensor_msgs/msg/Image", "sensor_msgs/msg/CompressedImage"});
 
     auto app = std::make_shared<VioManager>(params);
+    // State/timing replay has no auxiliary consumer; retain loop output when visualization is requested.
+    app->set_active_tracks_enabled(visualize);
     app->set_active_image_enabled(visualize); // only the loop-closure outputs use it
     std::shared_ptr<ROS2Visualizer> viz;
     if (visualize)
@@ -201,7 +203,9 @@ int main(int argc, char **argv) {
         if (topic_types.at(bag_message->topic_name) == "sensor_msgs/msg/CompressedImage") {
           const auto compressed = deserialize<sensor_msgs::msg::CompressedImage>(*bag_message);
           timestamp = stamp_seconds(compressed.header.stamp);
-          image = cv::imdecode(compressed.data, cv::IMREAD_GRAYSCALE);
+          // Lyrical stores uint8 arrays in rosidl::Buffer; OpenCV accepts std::vector.
+          const std::vector<uint8_t> encoded(compressed.data.begin(), compressed.data.end());
+          image = cv::imdecode(encoded, cv::IMREAD_GRAYSCALE);
         } else {
           const auto raw = deserialize<sensor_msgs::msg::Image>(*bag_message);
           timestamp = stamp_seconds(raw.header.stamp);

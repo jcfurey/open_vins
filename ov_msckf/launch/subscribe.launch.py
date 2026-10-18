@@ -1,11 +1,11 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, TextSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from ament_index_python.packages import get_package_share_directory, get_package_prefix
+from launch_ros.parameter_descriptions import ParameterValue
+from ament_index_python.packages import get_package_share_directory
 import os
-import sys
 
 launch_args = [
     DeclareLaunchArgument(name="namespace", default_value="ov_msckf", description="namespace"),
@@ -44,7 +44,9 @@ launch_args = [
         name="save_total_state",
         default_value="false",
         description="record the total state with calibration and features to a txt file",
-    )
+    ),
+    DeclareLaunchArgument(name="use_sim_time", default_value="false", description="use the ROS /clock topic"),
+    DeclareLaunchArgument(name="ros_params_file", default_value="", description="optional ROS 2 parameter YAML, including QoS overrides"),
 ]
 
 def launch_setup(context):
@@ -74,25 +76,33 @@ def launch_setup(context):
                         config_path)
                     )
             ]
+    ros_params_file = LaunchConfiguration("ros_params_file").perform(context)
+    if ros_params_file and not os.path.isfile(ros_params_file):
+        raise RuntimeError(f"ROS parameter file does not exist: {ros_params_file}")
+    parameters = [{
+        "verbosity": ParameterValue(LaunchConfiguration("verbosity"), value_type=str),
+        "use_stereo": ParameterValue(LaunchConfiguration("use_stereo"), value_type=bool),
+        "max_cameras": ParameterValue(LaunchConfiguration("max_cameras"), value_type=int),
+        "save_total_state": ParameterValue(LaunchConfiguration("save_total_state"), value_type=bool),
+        "use_sim_time": ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool),
+        "config_path": config_path,
+    }]
+    if ros_params_file:
+        parameters.append(ros_params_file)
     node1 = Node(
         package="ov_msckf",
         executable="run_subscribe_msckf",
         condition=IfCondition(LaunchConfiguration("ov_enable")),
         namespace=LaunchConfiguration("namespace"),
         output='screen',
-        parameters=[
-            {"verbosity": LaunchConfiguration("verbosity")},
-            {"use_stereo": LaunchConfiguration("use_stereo")},
-            {"max_cameras": LaunchConfiguration("max_cameras")},
-            {"save_total_state": LaunchConfiguration("save_total_state")},
-            {"config_path": config_path},
-        ],
+        parameters=parameters,
     )
 
     node2 = Node(
         package="rviz2",
         executable="rviz2",
         condition=IfCondition(LaunchConfiguration("rviz_enable")),
+        parameters=[{"use_sim_time": ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)}],
         arguments=[
             "-d"
             + os.path.join(

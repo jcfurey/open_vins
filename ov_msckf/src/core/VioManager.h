@@ -86,6 +86,10 @@ public:
   /// Geometry history continues to update so newly connected consumers can use the next frame.
   void set_active_image_enabled(bool enabled) { active_image_enabled = enabled; }
 
+  /// Control auxiliary loop-closure triangulation; this does not participate in filter updates.
+  /// Re-enabling starts a fresh history from subsequent camera observations.
+  void set_active_tracks_enabled(bool enabled) { active_tracks_enabled = enabled; }
+
   /**
    * @brief Feed function for a synchronized simulated cameras
    * @param timestamp Time that this image was collected
@@ -247,6 +251,7 @@ protected:
   std::unordered_map<size_t, Eigen::Vector3d> active_tracks_uvd;
   cv::Mat active_image;
   bool active_image_enabled = true;
+  bool active_tracks_enabled = true;
   std::map<size_t, Eigen::Matrix3d> active_feat_linsys_A;
   std::map<size_t, Eigen::Vector3d> active_feat_linsys_b;
   std::map<size_t, int> active_feat_linsys_count;

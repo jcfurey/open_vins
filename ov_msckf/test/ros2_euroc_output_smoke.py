@@ -16,16 +16,23 @@ import time
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry, Path as RosPath
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from tf2_msgs.msg import TFMessage
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seconds', type=float, required=True)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--camera-width', type=int, default=752)
+parser.add_argument('--camera-height', type=int, default=480)
+parser.add_argument('--image-reliability', choices=['reliable','best_effort'], default='reliable')
 args = parser.parse_args()
+if args.camera_width <= 0 or args.camera_height <= 0:
+    parser.error('camera dimensions must be positive')
 rclpy.init()
 node = rclpy.create_node('open_vins_output_contract_audit')
+image_qos = QoSProfile(depth=10, reliability=(ReliabilityPolicy.RELIABLE if args.image_reliability == 'reliable'
+                                           else ReliabilityPolicy.BEST_EFFORT))
 counts = dict(pose=0, odometry=0, path=0, image=0, points=0, tf=0,
               loop_pose=0, intrinsics=0, depth=0, depth_color=0)
 errors = []
@@ -69,8 +76,15 @@ def loop_pose(message):
 
 def intrinsics(message):
     header(message, 'intrinsics', 'audit_cam0')
-    check(message.width == 752 and message.height == 480, 'CameraInfo: wrong image dimensions')
+    check(message.width == args.camera_width and message.height == args.camera_height,
+          'CameraInfo: wrong image dimensions')
     check(message.k[0] > 0 and message.k[4] > 0 and message.k[8] == 1, 'CameraInfo: invalid K')
+    # Online calibration may refine EuRoC's supplied focal lengths, but the
+    # published calibration must use the processed image's pixel coordinates.
+    expected_fx = 458.654 * args.camera_width / 752
+    expected_fy = 457.296 * args.camera_height / 480
+    check(abs(message.k[0] / expected_fx - 1) < .25 and abs(message.k[4] / expected_fy - 1) < .25,
+          'CameraInfo: focal lengths do not match processed image scale')
     check(list(message.r) == [1, 0, 0, 0, 1, 0, 0, 0, 1], 'CameraInfo: invalid R')
     check(message.p[0] > 0 and message.p[5] > 0 and message.p[10] == 1, 'CameraInfo: invalid P')
     check(message.distortion_model == 'plumb_bob' and len(message.d) == 5, 'CameraInfo: invalid distortion schema')
@@ -79,6 +93,8 @@ def depth(message, colored):
     kind = 'depth_color' if colored else 'depth'
     header(message, kind, 'audit_cam0')
     check(message.encoding == ('bgr8' if colored else '16UC1'), kind + ': wrong encoding')
+    check(message.width == args.camera_width and message.height == args.camera_height,
+          kind + ': wrong image dimensions')
     check(message.step >= message.width * (3 if colored else 2), kind + ': wrong stride')
     check(len(message.data) == message.step * message.height, kind + ': inconsistent pixel storage')
 
@@ -92,12 +108,12 @@ def transforms(message):
 subscriptions = [
     node.create_subscription(Odometry, '/loop_pose', loop_pose, 10),
     node.create_subscription(CameraInfo, '/loop_intrinsics', intrinsics, 10),
-    node.create_subscription(Image, '/loop_depth', lambda m: depth(m, False), qos_profile_sensor_data),
-    node.create_subscription(Image, '/loop_depth_colored', lambda m: depth(m, True), qos_profile_sensor_data),
+    node.create_subscription(Image, '/loop_depth', lambda m: depth(m, False), image_qos),
+    node.create_subscription(Image, '/loop_depth_colored', lambda m: depth(m, True), image_qos),
     node.create_subscription(PoseWithCovarianceStamped, '/poseimu', pose, 10),
     node.create_subscription(Odometry, '/odomimu', odometry, 100),
     node.create_subscription(RosPath, '/pathimu', path, 10),
-    node.create_subscription(Image, '/trackhist', lambda m: header(m, 'image', 'audit_cam0'), qos_profile_sensor_data),
+    node.create_subscription(Image, '/trackhist', lambda m: header(m, 'image', 'audit_cam0'), image_qos),
     node.create_subscription(PointCloud2, '/points_msckf', lambda m: header(m, 'points'), qos_profile_sensor_data),
     node.create_subscription(TFMessage, '/tf', transforms, qos_profile_sensor_data),
 ]
@@ -110,7 +126,8 @@ for kind, count in counts.items():
     check(count > 0, 'No output received for ' + kind)
 if counts['image'] > 1:
     check(counts['image'] <= (last['image'] - first['image']) * 10 + 2, 'image: exceeded configured publication rate')
-report = dict(counts=counts, peak_path=peak_path, errors=errors)
+report = dict(counts=counts, peak_path=peak_path, errors=errors,
+              expected_camera_dimensions=[args.camera_width, args.camera_height], image_reliability=args.image_reliability)
 args.output.write_text(json.dumps(report, indent=2) + '\n')
 print(json.dumps(report, indent=2))
 assert not errors, errors

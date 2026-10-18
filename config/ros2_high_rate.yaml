@@ -1,0 +1,14 @@
+# Optional ingress settings for synchronized high-rate camera/IMU streams.
+# Use with the calibration/configuration of the actual camera rig.
+# track_frequency is an acceptance ceiling; scene-processing capacity is measured
+# separately. SensorDataQoS remains compatible with best-effort live drivers.
+/**:
+  ros__parameters:
+    track_frequency: 240.0
+    num_opencv_threads: 2
+    executor_threads: 1
+    stereo_sync_tolerance: 0.001
+    camera_qos_depth: 64
+    imu_qos_depth: 1000
+    max_camera_queue_size: 64
+    max_imu_queue_size: 4096

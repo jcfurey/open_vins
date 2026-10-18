@@ -22,6 +22,7 @@
 #include "DynamicInitializer.h"
 
 #include <algorithm>
+#include <iterator>
 
 #include "ceres/Factor_GenericPrior.h"
 #include "ceres/Factor_ImageReprojCalib.h"
@@ -69,7 +70,9 @@ bool DynamicInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarian
     return data.timestamp < oldest_time + params.calib_camimu_dt;
   });
   const bool have_old_imu_readings = first_current_imu != imu_data->begin();
-  imu_data->erase(imu_data->begin(), first_current_imu);
+  // Preserve the left IMU bracket when a camera boundary lies between samples.
+  const auto first_kept_imu = have_old_imu_readings ? std::prev(first_current_imu) : first_current_imu;
+  imu_data->erase(imu_data->begin(), first_kept_imu);
   if (_db->get_internal_data().size() < 0.75 * params.init_max_features) {
     PRINT_WARNING(RED "[init-d]: only %zu valid features of required (%.0f thresh)!!\n" RESET, _db->get_internal_data().size(),
                   0.95 * params.init_max_features);
@@ -99,7 +102,7 @@ bool DynamicInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarian
 
   // Settings
   const int min_num_meas_to_optimize = (int)params.init_window_time;
-  const int min_valid_features = 8;
+  const int min_valid_features = params.init_dyn_min_features;
 
   // Validation information for features we can use
   bool have_stereo = false;
@@ -160,7 +163,7 @@ bool DynamicInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarian
     return false;
   }
   if (count_valid_features < min_valid_features) {
-    PRINT_WARNING(RED "[init-d]: only %zu valid features of required %d!!\n" RESET, count_valid_features, min_valid_features);
+    PRINT_WARNING(RED "[init-d]: only %d valid features of required %d!!\n" RESET, count_valid_features, min_valid_features);
     return false;
   }
 
@@ -176,7 +179,10 @@ bool DynamicInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarian
   double time0_in_imu = oldest_camera_time + params.calib_camimu_dt;
   double time1_in_imu = newest_cam_time + params.calib_camimu_dt;
   std::vector<ov_core::ImuData> readings = InitializerHelper::select_imu_readings(*imu_data, time0_in_imu, time1_in_imu);
-  assert(readings.size() > 2);
+  if (readings.size() < 3) {
+    PRINT_DEBUG(YELLOW "[init-d]: waiting for IMU coverage of the full camera window\n" RESET);
+    return false;
+  }
   for (size_t k = 0; k < readings.size() - 1; k++) {
     auto imu0 = readings.at(k);
     auto imu1 = readings.at(k + 1);
@@ -545,7 +551,7 @@ bool DynamicInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarian
     }
   }
   if (count_valid_features < min_valid_features) {
-    PRINT_ERROR(YELLOW "[init-d]: not enough features for our mle (%zu < %d)!\n" RESET, count_valid_features, min_valid_features);
+    PRINT_WARNING(YELLOW "[init-d]: not enough features for our mle (%d < %d)!\n" RESET, count_valid_features, min_valid_features);
     return false;
   }
 
@@ -893,7 +899,7 @@ bool DynamicInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarian
   // Optimize the ceres graph
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
-  PRINT_INFO("[init-d]: %d iterations | %zu states, %zu feats (%zu valid) | %d param and %d res | cost %.4e => %.4e\n",
+  PRINT_INFO("[init-d]: %d iterations | %zu states, %zu feats (%d valid) | %d param and %d res | cost %.4e => %.4e\n",
              (int)summary.iterations.size(), map_states.size(), map_features.size(), count_valid_features, summary.num_parameters,
              summary.num_residuals, summary.initial_cost, summary.final_cost);
   auto rT6 = boost::posix_time::microsec_clock::local_time();

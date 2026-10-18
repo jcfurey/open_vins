@@ -1,0 +1,31 @@
+# EuRoC replay preset captured from the registry-based tuning study.
+/**:
+  ros__parameters:
+    calib_cam_extrinsics: true
+    calib_cam_timeoffset: true
+    init_dyn_min_features: 35
+    init_dyn_mle_max_threads: 1
+    init_dyn_use: true
+    max_msckf_in_update: 60
+    max_slam: 25
+    num_opencv_threads: 1
+    num_pts: 200
+    try_zupt: true
+    verbosity: INFO
+    zupt_only_at_beginning: true
+    use_sim_time: true
+    executor_threads: 1
+    qos_overrides./imu0.subscription.reliability: reliable
+    qos_overrides./imu0.subscription.depth: 1000
+    qos_overrides./cam0/image_raw.subscription.reliability: reliable
+    qos_overrides./cam0/image_raw.subscription.depth: 30
+    qos_overrides./cam1/image_raw.subscription.reliability: reliable
+    qos_overrides./cam1/image_raw.subscription.depth: 30
+    trackhist.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth_colored.enable_pub_plugins:
+    - image_transport/raw
+    camera_qos_depth: 30
+    max_camera_queue_size: 40

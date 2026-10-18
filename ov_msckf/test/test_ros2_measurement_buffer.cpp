@@ -21,6 +21,8 @@ TEST(Ros2Buffer, RequiresValidLimits) {
   EXPECT_THROW(Ros2MeasurementBuffer(2, 0, 1, 20), std::invalid_argument);
   EXPECT_THROW(Ros2MeasurementBuffer(2, 2, 0, 20), std::invalid_argument);
   EXPECT_THROW(Ros2MeasurementBuffer(2, 2, 1, 0), std::invalid_argument);
+  EXPECT_THROW(Ros2MeasurementBuffer(2, 2, 1, 20, true, 0), std::invalid_argument);
+  EXPECT_THROW(Ros2MeasurementBuffer(2, 2, 1, 20, true, std::numeric_limits<double>::infinity()), std::invalid_argument);
 }
 
 TEST(Ros2Buffer, RejectsBadImuAndDuplicates) {
@@ -87,11 +89,64 @@ TEST(Ros2Buffer, BoundedCamerasKeepRecentFrames) {
   EXPECT_EQ(stats.cameras_pending, 2U);
   EXPECT_EQ(stats.camera_peak, 2U);
   EXPECT_EQ(stats.cameras_dropped, 1U);
+  EXPECT_EQ(stats.resets, 1U);
   buffer.push_imu(imu(4));
   Ros2MeasurementBuffer::Batch batch;
   ASSERT_TRUE(buffer.wait_take(batch, -1, 0));
   ASSERT_TRUE(batch.camera);
+  EXPECT_TRUE(batch.reset);
   EXPECT_DOUBLE_EQ(batch.camera->timestamp, 2);
+}
+
+TEST(Ros2Buffer, LongVisualGapStartsANewEpochWithFreshImu) {
+  Ros2MeasurementBuffer buffer(8, 3, 1, 20, true, 0.5);
+  buffer.push_camera(camera(1));
+  buffer.push_imu(imu(1.01));
+  Ros2MeasurementBuffer::Batch batch;
+  ASSERT_TRUE(buffer.wait_take(batch, -1, 0));
+  ASSERT_TRUE(batch.camera);
+  EXPECT_FALSE(batch.reset);
+  buffer.push_camera(camera(3));
+  // A reset must not use IMU coverage belonging to the previous estimator epoch.
+  ASSERT_TRUE(buffer.wait_take(batch, 4, 0));
+  EXPECT_TRUE(batch.reset);
+  EXPECT_FALSE(batch.camera);
+  buffer.push_imu(imu(3.01));
+  ASSERT_TRUE(buffer.wait_take(batch, -1, 0));
+  ASSERT_TRUE(batch.camera);
+  ASSERT_EQ(batch.imu.size(), 1U);
+  EXPECT_DOUBLE_EQ(batch.camera->timestamp, 3);
+  EXPECT_FALSE(batch.reset);
+  EXPECT_EQ(buffer.statistics().resets, 1U);
+}
+
+TEST(Ros2Buffer, NativeShortCameraGapsDoNotReset) {
+  Ros2MeasurementBuffer buffer(8, 3, 1, 20, true, 0.5);
+  Ros2MeasurementBuffer::Batch batch;
+  for (double time : {1.0, 1.1, 1.6}) {
+    buffer.push_camera(camera(time));
+    buffer.push_imu(imu(time + 0.01));
+    ASSERT_TRUE(buffer.wait_take(batch, -1, 0));
+    ASSERT_TRUE(batch.camera);
+    EXPECT_FALSE(batch.reset);
+  }
+  EXPECT_EQ(buffer.statistics().resets, 0U);
+}
+
+TEST(Ros2Buffer, CameraOverflowDoesNotReuseOldImuCoverage) {
+  Ros2MeasurementBuffer buffer(8, 1, 1, 20);
+  buffer.push_camera(camera(1));
+  buffer.push_camera(camera(1.05));
+  Ros2MeasurementBuffer::Batch batch;
+  ASSERT_TRUE(buffer.wait_take(batch, 2, 0));
+  EXPECT_TRUE(batch.reset);
+  EXPECT_FALSE(batch.camera);
+  buffer.push_imu(imu(1.06));
+  ASSERT_TRUE(buffer.wait_take(batch, -1, 0));
+  ASSERT_TRUE(batch.camera);
+  EXPECT_FALSE(batch.reset);
+  EXPECT_EQ(buffer.statistics().resets, 1U);
+  EXPECT_EQ(buffer.statistics().cameras_dropped, 1U);
 }
 
 TEST(Ros2Buffer, ImuLossRequestsEstimatorReset) {

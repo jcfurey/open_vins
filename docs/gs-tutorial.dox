@@ -149,12 +149,62 @@ We can then use the ROS2 rosbag file.
 First make sure you have installed the rosbag2 and all its backends.
 If you downloaded the bag above you should already have a valid bag format.
 Otherwise, you will need to convert it following @ref dev-ros1-to-ros2 .
-A "bag" is now defined by a db3 sqlite database and config yaml file in a folder.
+A ROS 2 bag directory contains metadata.yaml and storage files, commonly MCAP or SQLite3.
 In another terminal we can run the following:
 
 @code{.shell-session}
 ros2 bag play V1_01_easy
 @endcode
+
+For playback, use the ROS clock and the bundled reliable-sensor parameter profile:
+
+@code{.shell-session}
+params="$(ros2 pkg prefix --share ov_msckf)/config/euroc_mav/ros2_bag.yaml"
+ros2 launch ov_msckf subscribe.launch.py config:=euroc_mav use_sim_time:=true ros_params_file:="$params"
+# In another terminal, after the node's subscriptions are visible:
+player_qos="$(ros2 pkg prefix --share ov_msckf)/config/euroc_mav/ros2_player.yaml"
+ros2 bag play V1_01_easy --clock --qos-profile-overrides-path "$player_qos" --wait-for-all-acked 5000
+@endcode
+
+Live camera/IMU subscriptions use SensorDataQoS by default, so best-effort drivers remain compatible.
+Reliable bag publishers can retransmit lost fragments when subscribers request reliable delivery.
+The player profile also retains 1000 IMUs for retransmission. Reliable delivery with a short
+keep_last writer history can still expire samples before a delayed subscriber receives them.
+The [standard ROS 2 QoS override mechanism](https://design.ros2.org/articles/qos_configurability.html)
+is supported for sensor reliability and bounded queue depth. Override names use resolved topic names,
+for example `qos_overrides./cam0/image_raw.subscription.reliability:=reliable`.
+Change the topic keys in ros2_bag.yaml when remapping sensors. These settings are read-only after startup.
+History remains keep_last; IMU depth must be 1--100000 and camera depth 1--1000.
+The EuRoC replay profile uses 1000-sample reliable writer histories, a 1000-sample
+IMU reader, 64-sample camera readers/synchronization, and a 64-packet application
+camera queue. These bounds provide startup headroom during accelerated replay.
+`ros2_euroc_compact.yaml` and `ros2_euroc_fixed.yaml` capture the tested algorithm
+presets with the earlier 30/40 camera bounds; select either with `ros_params_file`.
+The fixed preset keeps camera intrinsics online while fixing extrinsics and time offset.
+`ros2_euroc_throughput_full.yaml` and `ros2_euroc_throughput_half.yaml` use a
+15-clone window, two OpenCV workers and the 64-sample/pair bounds. The half preset
+uses built-in image downsampling and 0.5 processed-pixel visual noise.
+For faster live sensors, `config/ros2_high_rate.yaml` raises the camera acceptance
+ceiling to 240 Hz while retaining SensorDataQoS. That ceiling is separate from
+scene-processing capacity; use the actual rig's calibration and measure both.
+
+The ROS 2 node has two callback-executor threads and one estimator worker by default.
+The EuRoC bag profile uses one callback thread, since these callbacks only enqueue measurements.
+`executor_threads` and `num_opencv_threads` control separate pools; the latter is a process-wide OpenCV setting.
+Serial runners skip auxiliary loop-closure triangulation when visualization is disabled.
+The live node builds that output when a consumer connects; auxiliary history starts with subsequent observations.
+Image buffers remain owned copies because trackers can retain them after the ROS callback returns.
+
+Camera queue overflow now requests a counted estimator reset, as does a gap between processed
+camera packets exceeding `max_camera_gap_seconds` (default 1.0 s). Fresh IMU coverage is required
+after a reset. The bounded queues and drop/reset counters remain visible; recovery does not make
+an overloaded replay pass input-completeness checks. Normal EuRoC 50--100 ms intervals do not reset.
+
+Dynamic startup can require additional triangulated tracks using `init_dyn_min_features` (default 8).
+This threshold is checked both before the linear solve and after rejecting features behind the cameras.
+It is independent of `init_max_features`, which controls the tracking target. A larger minimum can delay
+initialization in scenes with few features. Serial replay uses one Ceres thread without a wall-time cutoff;
+the live node retains its configured solver budget, so compare these runtime modes separately.
 
 
 

@@ -104,6 +104,32 @@ TEST(ActiveStereoTracks, AccumulatesBothBearingsWithoutTemporalMotion) {
   EXPECT_EQ(manager.counts().begin()->second, 6);
 }
 
+TEST(ActiveStereoTracks, DisabledOutputsReleaseHistoryAndSupportALateConsumer) {
+  auto options = stereo_options();
+  ActiveTrackManager manager(options);
+  manager.frame(10);
+  ASSERT_FALSE(manager.counts().empty());
+  manager.set_active_tracks_enabled(false);
+  manager.frame(10.05);
+  EXPECT_TRUE(manager.counts().empty());
+  EXPECT_TRUE(manager.points().empty());
+  double time;
+  cv::Mat image;
+  manager.get_active_image(time, image);
+  EXPECT_TRUE(image.empty());
+  manager.set_active_tracks_enabled(true);
+  manager.frame(10.1);
+  ASSERT_EQ(manager.counts().size(), 1U);
+  EXPECT_EQ(manager.counts().begin()->second, 2);
+  EXPECT_TRUE(manager.points().empty()); // Auxiliary triangulation requires more than three bearings.
+  manager.frame(10.15);
+  EXPECT_EQ(manager.counts().begin()->second, 4);
+  ASSERT_EQ(manager.points().size(), 1U);
+  EXPECT_NEAR((manager.points().begin()->second - Eigen::Vector3d(0, 0, 5)).norm(), 0, 1e-6);
+  manager.get_active_image(time, image);
+  EXPECT_EQ(image.size(), cv::Size(320, 240));
+}
+
 TEST(Ros2ResetCalibration, RestoresIndependentCameraModelsAcrossRepeatedEpochs) {
   auto original = stereo_options();
   auto fisheye = std::make_shared<ov_core::CamEqui>(320, 240);

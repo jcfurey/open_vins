@@ -118,6 +118,14 @@ bool StaticInitializer::initialize(double &timestamp, Eigen::MatrixXd &covarianc
     return false;
   }
 
+  // A quiet accelerometer can also be in free fall. It cannot define a gravity direction.
+  // Reject before touching the output state instead of normalizing a zero/nonfinite vector.
+  if (!a_avg_2to1.allFinite() || !w_avg_2to1.allFinite() || !std::isfinite(a_var_1to0) || !std::isfinite(a_var_2to1) ||
+      a_avg_2to1.norm() < 1e-6) {
+    PRINT_WARNING(YELLOW "[init-s]: invalid gravity direction or nonfinite IMU statistics\n" RESET);
+    return false;
+  }
+
   // Get rotation with z axis aligned with -g (z_in_G=0,0,1)
   Eigen::Vector3d z_axis = a_avg_2to1 / a_avg_2to1.norm();
   Eigen::Matrix3d Ro;

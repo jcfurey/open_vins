@@ -1,0 +1,33 @@
+# EuRoC replay throughput preset, frozen from the accuracy/ingestion study.
+# Sensor timestamps remain 20 Hz; config/ros2_high_rate.yaml raises the ceiling for faster live sensors.
+/**:
+  ros__parameters:
+    verbosity: INFO
+    calib_cam_extrinsics: false
+    calib_cam_timeoffset: false
+    max_slam: 20
+    max_msckf_in_update: 60
+    try_zupt: true
+    zupt_only_at_beginning: true
+    init_dyn_min_features: 25
+    init_dyn_use: true
+    init_dyn_mle_max_threads: 1
+    num_pts: 300
+    num_opencv_threads: 2
+    use_sim_time: true
+    executor_threads: 1
+    qos_overrides./imu0.subscription.reliability: reliable
+    qos_overrides./imu0.subscription.depth: 1000
+    qos_overrides./cam0/image_raw.subscription.reliability: reliable
+    qos_overrides./cam0/image_raw.subscription.depth: 64
+    qos_overrides./cam1/image_raw.subscription.reliability: reliable
+    qos_overrides./cam1/image_raw.subscription.depth: 64
+    trackhist.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth_colored.enable_pub_plugins:
+    - image_transport/raw
+    camera_qos_depth: 64
+    max_camera_queue_size: 64
+    max_clones: 15

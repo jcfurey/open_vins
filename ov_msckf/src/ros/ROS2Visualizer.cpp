@@ -26,6 +26,7 @@
 #include "ros/ROSVisualizerHelper.h"
 #include "ros/Ros2Compat.h"
 #include "ros/Ros2Covariance.h"
+#include "ros/Ros2SensorQos.h"
 #include "sim/Simulator.h"
 #include "state/Propagator.h"
 #include "state/State.h"
@@ -110,8 +111,9 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node, std::shared_p
       throw std::invalid_argument("Camera TF frames must be distinct from global, IMU, and truth frames");
   }
   const bool reset_on_jump = boolean("reset_on_time_jump", true);
+  const double max_camera_gap = real("max_camera_gap_seconds", 1.0, 0.001);
   measurements = std::make_unique<Ros2MeasurementBuffer>(max_imu_queue, max_camera_queue, sensor_options->state_options.num_cameras,
-                                                         sensor_options->track_frequency, reset_on_jump);
+                                                         sensor_options->track_frequency, reset_on_jump, max_camera_gap);
   input_masks = sensor_options->input_masks();
   for (const auto &mask : input_masks)
     image_sizes.emplace(mask.first, mask.second.size());
@@ -222,7 +224,7 @@ void ROS2Visualizer::stop() {
 }
 
 void ROS2Visualizer::reset_estimator() {
-  RCLCPP_WARN(_node->get_logger(), "Resetting estimator after an IMU discontinuity or exceeded history limit");
+  RCLCPP_WARN(_node->get_logger(), "Resetting estimator after sensor loss, a time discontinuity, or exceeded history limit");
   auto options = copy_ros2_reset_options(*sensor_options);
   options.use_multi_threading_subs = false;
   options.use_multi_threading_pubs = false;
@@ -252,7 +254,9 @@ void ROS2Visualizer::run_estimator() {
       if (batch.camera) {
         last_camera_time = batch.camera->timestamp;
         last_camera_imu_time = last_camera_time + _app->get_state()->_calib_dt_CAMtoIMU->value()(0);
-        _app->set_active_image_enabled(has_loopclosure_subscribers());
+        const bool loopclosure_requested = has_loopclosure_subscribers();
+        _app->set_active_tracks_enabled(loopclosure_requested);
+        _app->set_active_image_enabled(loopclosure_requested);
         _app->feed_measurement_camera(*batch.camera);
         visualize();
       }
@@ -297,6 +301,8 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<YamlParser> parser) {
   rclcpp::SubscriptionOptions imu_subscription_options, camera_subscription_options;
   imu_subscription_options.callback_group = imu_callback_group;
   camera_subscription_options.callback_group = camera_callback_group;
+  imu_subscription_options.qos_overriding_options = sensor_qos_overrides(100000);
+  camera_subscription_options.qos_overriding_options = sensor_qos_overrides(1000);
   auto imu_qos = rclcpp::SensorDataQoS().keep_last(imu_qos_depth);
   auto camera_qos = rclcpp::SensorDataQoS().keep_last(camera_qos_depth);
 

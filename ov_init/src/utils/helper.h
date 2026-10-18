@@ -22,6 +22,10 @@
 #ifndef OV_INIT_HELPER
 #define OV_INIT_HELPER
 
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+
 #include "cpi/CpiV1.h"
 #include "types/IMU.h"
 
@@ -61,68 +65,46 @@ public:
    * @param imu_data_tmp IMU data we will select measurements from
    * @param time0 Start timestamp
    * @param time1 End timestamp
-   * @return Vector of measurements (if we could compute them)
+   * @return Bracketed samples including both exact interval endpoints; empty for incomplete or invalid input
    */
   static std::vector<ov_core::ImuData> select_imu_readings(const std::vector<ov_core::ImuData> &imu_data_tmp, double time0, double time1) {
-    // Our vector imu readings
-    std::vector<ov_core::ImuData> prop_data;
-
-    // Ensure we have some measurements in the first place!
-    if (imu_data_tmp.empty()) {
-      return prop_data;
+    // Integrate the full requested interval, including an exact final buffered sample.
+    // Selection must not change when an unrelated future measurement arrives.
+    if (imu_data_tmp.size() < 2 || !std::isfinite(time0) || !std::isfinite(time1) || time1 - time0 <= 1e-12 ||
+        time0 < imu_data_tmp.front().timestamp || time1 > imu_data_tmp.back().timestamp)
+      return {};
+    for (size_t i = 0; i < imu_data_tmp.size(); ++i) {
+      if (!std::isfinite(imu_data_tmp[i].timestamp) || (i > 0 && imu_data_tmp[i].timestamp < imu_data_tmp[i - 1].timestamp))
+        return {};
     }
-
-    // Loop through and find all the needed measurements to propagate with
-    // Note we split measurements based on the given state time, and the update timestamp
-    for (size_t i = 0; i < imu_data_tmp.size() - 1; i++) {
-
-      // START OF THE INTEGRATION PERIOD
-      if (imu_data_tmp.at(i + 1).timestamp > time0 && imu_data_tmp.at(i).timestamp < time0) {
-        ov_core::ImuData data = interpolate_data(imu_data_tmp.at(i), imu_data_tmp.at(i + 1), time0);
-        prop_data.push_back(data);
-        continue;
-      }
-
-      // MIDDLE OF INTEGRATION PERIOD
-      if (imu_data_tmp.at(i).timestamp >= time0 && imu_data_tmp.at(i + 1).timestamp <= time1) {
-        prop_data.push_back(imu_data_tmp.at(i));
-        continue;
-      }
-
-      // END OF THE INTEGRATION PERIOD
-      if (imu_data_tmp.at(i + 1).timestamp > time1) {
-        if (imu_data_tmp.at(i).timestamp > time1 && i == 0) {
-          break;
-        } else if (imu_data_tmp.at(i).timestamp > time1) {
-          ov_core::ImuData data = interpolate_data(imu_data_tmp.at(i - 1), imu_data_tmp.at(i), time1);
-          prop_data.push_back(data);
-        } else {
-          prop_data.push_back(imu_data_tmp.at(i));
-        }
-        if (prop_data.at(prop_data.size() - 1).timestamp != time1) {
-          ov_core::ImuData data = interpolate_data(imu_data_tmp.at(i), imu_data_tmp.at(i + 1), time1);
-          prop_data.push_back(data);
-        }
-        break;
-      }
+    auto upper = [&](double time) {
+      return std::upper_bound(imu_data_tmp.begin(), imu_data_tmp.end(), time,
+                              [](double stamp, const ov_core::ImuData &imu) { return stamp < imu.timestamp; });
+    };
+    auto sample = [&](double time) {
+      const auto right = upper(time);
+      const auto left = std::prev(right);
+      if (left->timestamp == time)
+        return *left;
+      return interpolate_data(*left, *right, time);
+    };
+    const auto first = upper(time0);
+    const auto last = upper(time1);
+    std::vector<ov_core::ImuData> selected;
+    selected.reserve(static_cast<size_t>(std::distance(first, last)) + 2);
+    selected.push_back(sample(time0));
+    for (auto it = first; it != last && it->timestamp < time1; ++it) {
+      if (it->timestamp - selected.back().timestamp > 1e-12)
+        selected.push_back(*it);
     }
-
-    // Check that we have at least one measurement to propagate with
-    if (prop_data.empty()) {
-      return prop_data;
+    if (selected.size() > 1 && time1 - selected.back().timestamp <= 1e-12)
+      selected.pop_back();
+    selected.push_back(sample(time1));
+    for (const auto &measurement : selected) {
+      if (!measurement.wm.allFinite() || !measurement.am.allFinite())
+        return {};
     }
-
-    // Loop through and ensure we do not have an zero dt values
-    // This would cause the noise covariance to be Infinity
-    for (size_t i = 0; i < prop_data.size() - 1; i++) {
-      if (std::abs(prop_data.at(i + 1).timestamp - prop_data.at(i).timestamp) < 1e-12) {
-        prop_data.erase(prop_data.begin() + i);
-        i--;
-      }
-    }
-
-    // Success :D
-    return prop_data;
+    return selected;
   }
 
   /**

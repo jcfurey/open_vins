@@ -36,11 +36,14 @@ public:
     size_t imu_pending = 0, cameras_pending = 0, imu_peak = 0, camera_peak = 0;
   };
 
-  Ros2MeasurementBuffer(size_t imu_limit, size_t camera_limit, size_t camera_count, double tracking_rate, bool reset_on_time_jump = true)
+  Ros2MeasurementBuffer(size_t imu_limit, size_t camera_limit, size_t camera_count, double tracking_rate, bool reset_on_time_jump = true,
+                       double max_camera_gap = 1.0)
       : imu_limit_(imu_limit), camera_limit_(camera_limit), minimum_camera_dt_(1.0 / tracking_rate),
-        reset_on_time_jump_(reset_on_time_jump), camera_times_(camera_count, -std::numeric_limits<double>::infinity()) {
-    if (!imu_limit || !camera_limit || !camera_count || !std::isfinite(tracking_rate) || tracking_rate <= 0)
-      throw std::invalid_argument("Sensor queue sizes, camera count, and tracking rate must be positive");
+        max_camera_gap_(max_camera_gap), reset_on_time_jump_(reset_on_time_jump),
+        camera_times_(camera_count, -std::numeric_limits<double>::infinity()) {
+    if (!imu_limit || !camera_limit || !camera_count || !std::isfinite(tracking_rate) || tracking_rate <= 0 ||
+        !std::isfinite(max_camera_gap) || max_camera_gap <= 0)
+      throw std::invalid_argument("Sensor queue sizes, camera count, tracking rate, and maximum camera gap must be positive");
   }
 
   Result push_imu(const ov_core::ImuData &message) {
@@ -116,6 +119,11 @@ public:
     if (cameras_.size() > camera_limit_) {
       cameras_.pop_front();
       ++statistics_.cameras_dropped;
+      // Lost visual updates invalidate the old track/state history under overload.
+      // Reinitialize with bounded, recent input instead of silently propagating through the loss.
+      if (!reset_pending_)
+        ++statistics_.resets;
+      reset_pending_ = true;
       result = Result::DroppedOldest;
     }
     ++statistics_.cameras_accepted;
@@ -130,9 +138,16 @@ public:
     condition_.wait(lock, [&] { return stopped_ || reset_pending_ || !imu_.empty() || camera_ready(fed_imu_time, camera_to_imu_offset); });
     if (stopped_)
       return false;
+    if (!reset_pending_ && !cameras_.empty() && cameras_.front().timestamp - last_camera_time_ > max_camera_gap_ &&
+        std::isfinite(last_camera_time_)) {
+      reset_pending_ = true;
+      ++statistics_.resets;
+    }
     batch = Batch{};
     batch.reset = reset_pending_;
     reset_pending_ = false;
+    if (batch.reset)
+      last_camera_time_ = -std::numeric_limits<double>::infinity();
     // Hand over a frame together with only the IMU that reaches it, so the estimator sees measurements in the
     // same order as an offline replay no matter how far behind the worker is.
     const double fed = batch.reset ? -1.0 : fed_imu_time;
@@ -146,6 +161,7 @@ public:
         imu_.erase(imu_.begin(), end);
         batch.camera = std::move(cameras_.front());
         cameras_.pop_front();
+        last_camera_time_ = batch.camera->timestamp;
         return true;
       }
     }
@@ -188,17 +204,19 @@ private:
     cameras_.clear();
     std::fill(camera_times_.begin(), camera_times_.end(), -std::numeric_limits<double>::infinity());
     latest_imu_time_ = -std::numeric_limits<double>::infinity();
+    last_camera_time_ = -std::numeric_limits<double>::infinity();
     reset_pending_ = true;
     ++statistics_.resets;
   }
 
   const size_t imu_limit_, camera_limit_;
-  const double minimum_camera_dt_;
+  const double minimum_camera_dt_, max_camera_gap_;
   const bool reset_on_time_jump_;
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   bool stopped_ = false, reset_pending_ = false;
   double latest_imu_time_ = -std::numeric_limits<double>::infinity();
+  double last_camera_time_ = -std::numeric_limits<double>::infinity();
   std::vector<double> camera_times_;
   std::deque<ov_core::ImuData> imu_;
   std::deque<ov_core::CameraData> cameras_;

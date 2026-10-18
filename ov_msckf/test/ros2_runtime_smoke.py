@@ -17,7 +17,7 @@ import time
 import rclpy
 from rclpy.parameter import Parameter
 from rclpy.parameter_client import AsyncParameterClient
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image, Imu
 
 
@@ -29,6 +29,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--raw-only", action="store_true",
                         help="Use raw image transport only, excluding optional transport plugins from sanitizer checks")
+    parser.add_argument("--reliable", action="store_true",
+                        help="Verify standard QoS overrides on remapped sensor topics")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     command = [str(args.executable.resolve()), str(args.config.resolve()), "--ros-args",
@@ -38,11 +40,16 @@ def main():
     if args.raw_only:
         for topic in ("trackhist", "loop_depth", "loop_depth_colored"):
             command += ["-p", topic + ".enable_pub_plugins:=[image_transport/raw]"]
+    if args.reliable:
+        for topic in ("/ov_audit/imu", "/ov_audit/left", "/ov_audit/right"):
+            command += ["-p", f"qos_overrides.{topic}.subscription.reliability:=reliable",
+                        "-p", f"qos_overrides.{topic}.subscription.depth:=20"]
     rclpy.init()
     node = rclpy.create_node("open_vins_runtime_smoke")
-    imu_pub = node.create_publisher(Imu, "/ov_audit/imu", qos_profile_sensor_data)
-    left_pub = node.create_publisher(Image, "/ov_audit/left", qos_profile_sensor_data)
-    right_pub = node.create_publisher(Image, "/ov_audit/right", qos_profile_sensor_data)
+    qos = QoSProfile(depth=20) if args.reliable else qos_profile_sensor_data
+    imu_pub = node.create_publisher(Imu, "/ov_audit/imu", qos)
+    left_pub = node.create_publisher(Image, "/ov_audit/left", qos)
+    right_pub = node.create_publisher(Image, "/ov_audit/right", qos)
     publishers = (imu_pub, left_pub, right_pub)
     log_path = args.output / "runtime.log"
 
@@ -75,6 +82,15 @@ def main():
 
             client = AsyncParameterClient(node, "run_subscribe_msckf")
             assert client.wait_for_services(timeout_sec=5)
+            if args.reliable:
+                for topic in ("/ov_audit/imu", "/ov_audit/left", "/ov_audit/right"):
+                    endpoints = [info for info in node.get_subscriptions_info_by_topic(topic)
+                                 if info.node_name == "run_subscribe_msckf"]
+                    assert len(endpoints) == 1, endpoints
+                    assert endpoints[0].qos_profile.reliability == ReliabilityPolicy.RELIABLE
+                    assert endpoints[0].qos_profile.depth == 20
+                name = "qos_overrides./ov_audit/imu.subscription.reliability"
+                assert call(client.describe_parameters([name])).descriptors[0].read_only
             description = call(client.describe_parameters(["max_camera_queue_size", "max_clones", "cam0_T_imu_cam"]))
             assert all(descriptor.read_only for descriptor in description.descriptors), description
             result = call(client.set_parameters([Parameter("max_camera_queue_size", value=100)]))
@@ -147,6 +163,11 @@ def main():
             invalid = subprocess.run(command + ["-p", f"max_camera_queue_size:={value}"],
                                      stdout=log, stderr=subprocess.STDOUT, timeout=15)
         assert invalid.returncode != 0, "Invalid queue size was accepted"
+    for topic, depth in (("/ov_audit/imu", 0), ("/ov_audit/imu", 100001), ("/ov_audit/left", 1001)):
+        with (args.output / f"invalid_qos_{topic.rsplit('/', 1)[-1]}_{depth}.log").open("w") as log:
+            invalid = subprocess.run(command + ["-p", f"qos_overrides.{topic}.subscription.depth:={depth}"],
+                                     stdout=log, stderr=subprocess.STDOUT, timeout=15)
+        assert invalid.returncode != 0, "Unbounded or zero QoS depth was accepted"
     print("ROS 2 runtime smoke passed:", counters)
 
 
