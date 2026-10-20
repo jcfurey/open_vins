@@ -142,6 +142,9 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
     std::static_pointer_cast<TrackKLT>(trackFEATS)->set_observation_uncertainty(params.msckf_options.use_observation_covariance,
                                                                             params.camera_extrinsics);
     std::static_pointer_cast<TrackKLT>(trackFEATS)->set_gyro_mode(params.gyro_klt_mode,params.gyro_klt_reference_age);
+    std::static_pointer_cast<TrackKLT>(trackFEATS)->set_flow_backend(params.klt_flow_backend,params.klt_cuda_device);
+    if (params.klt_flow_backend=="cuda")
+      PRINT_INFO("[CUDA-KLT] device=%d name=%s\n",params.klt_cuda_device,CudaKLT::device_name(params.klt_cuda_device).c_str());
     if (params.gyro_klt_mode!="none") PRINT_INFO("[GYRO-KLT] selected mode=%s\n",params.gyro_klt_mode.c_str());
     if (params.tracking_backend == "kltnet_onnx")
       std::static_pointer_cast<TrackKLT>(trackFEATS)->set_neural_tracker(params.kltnet_model_path, params.kltnet_target,

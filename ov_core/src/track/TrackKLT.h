@@ -27,6 +27,7 @@
 #include "NeuralFlow.h"
 #include "LearnedFeatures.h"
 #include "GyroKLT.h"
+#include "CudaKLT.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -97,6 +98,7 @@ public:
 
   /// Configure before feeding frames. Predictions are supplied serially by the estimator, without updating its state.
   void set_gyro_mode(const std::string &mode, int reference_age = 20);
+  void set_flow_backend(const std::string &backend, int device = 0);
   double last_frame_time(size_t camera) const { return frame_times.at(camera); }
   void set_gyro_predictions(double timestamp, const std::map<size_t, Eigen::Matrix3d> &rotations) {
     prediction_timestamp = timestamp;
@@ -229,6 +231,10 @@ protected:
   double letnet_minimum_score = 0.2;
   std::map<size_t, cv::Mat> score_current, score_last;
   std::string gyro_mode = "none";
+  std::map<size_t, std::shared_ptr<CudaKLT>> cuda_flows;
+  void optical_flow(const std::vector<cv::Mat> &previous, const std::vector<cv::Mat> &current,
+                    const std::vector<cv::Point2f> &points_previous, std::vector<cv::Point2f> &points_current,
+                    std::vector<uchar> &status, std::vector<float> &error, size_t camera);
   std::map<size_t, std::shared_ptr<GyroKLT>> gyro_trackers;
   std::map<size_t, std::vector<cv::Mat>> gyro_raw_last, gyro_raw_current;
   std::map<size_t, double> frame_times;

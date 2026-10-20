@@ -34,6 +34,24 @@
 
 using namespace ov_core;
 
+void TrackKLT::set_flow_backend(const std::string &backend, int device) {
+  if (backend!="cpu" && backend!="cuda") throw std::invalid_argument("klt_flow_backend must be cpu or cuda");
+  cuda_flows.clear();
+  if (backend=="cuda") {
+    if (neural_flow || learned_features) throw std::invalid_argument("CUDA KLT currently supports native grayscale tracking");
+    for (const auto &camera : camera_calib)
+      cuda_flows[camera.first]=std::make_shared<CudaKLT>(pyr_levels,win_size.width,device);
+  }
+}
+
+void TrackKLT::optical_flow(const std::vector<cv::Mat> &previous, const std::vector<cv::Mat> &current,
+                            const std::vector<cv::Point2f> &points_previous, std::vector<cv::Point2f> &points_current,
+                            std::vector<uchar> &status, std::vector<float> &error, size_t camera) {
+  if (!cuda_flows.empty()) cuda_flows.at(camera)->calc(previous[0],current[0],points_previous,points_current,status,error);
+  else cv::calcOpticalFlowPyrLK(previous,current,points_previous,points_current,status,error,win_size,pyr_levels,
+          cv::TermCriteria(cv::TermCriteria::COUNT|cv::TermCriteria::EPS,30,.01),cv::OPTFLOW_USE_INITIAL_FLOW);
+}
+
 void TrackKLT::set_gyro_mode(const std::string &mode, int reference_age) {
   if (mode != "none" && (neural_flow || learned_features || observation_uncertainty))
     throw std::invalid_argument("Gyro KLT currently requires native tracking and standard observation noise");
@@ -156,6 +174,9 @@ void TrackKLT::feed_new_camera(const CameraData &message) {
       auto features = learned_features->infer(img);
       score_current.at(cam_id) = std::move(features.score);
       cv::buildOpticalFlowPyramid(features.tracking, img_pyramid_curr.at(cam_id), win_size, pyr_levels);
+    } else if (!cuda_flows.empty()) {
+      // CUDA owns its pyramids; keep only the host image needed by visualization and geometry.
+      img_pyramid_curr.at(cam_id)={img};
     } else {
       cv::buildOpticalFlowPyramid(img, img_pyramid_curr.at(cam_id), win_size, pyr_levels);
     }
@@ -856,9 +877,7 @@ void TrackKLT::perform_detection_stereo(const std::vector<cv::Mat> &img0pyr, con
       std::vector<uchar> mask;
       // perform_matching(img0pyr, img1pyr, kpts0_new, kpts1_new, cam_id_left, cam_id_right, mask);
       std::vector<float> error;
-      cv::TermCriteria term_crit = cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 30, 0.01);
-      cv::calcOpticalFlowPyrLK(img0pyr, img1pyr, pts0_new, pts1_new, mask, error, win_size, pyr_levels, term_crit,
-                               cv::OPTFLOW_USE_INITIAL_FLOW);
+      optical_flow(img0pyr,img1pyr,pts0_new,pts1_new,mask,error,cam_id_left);
 
       // Loop through and record only ones that are valid
       for (size_t i = 0; i < pts0_new.size(); i++) {
@@ -1048,7 +1067,6 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::
   // Now do KLT tracking to get the valid new points
   std::vector<uchar> mask_klt;
   std::vector<float> error;
-  cv::TermCriteria term_crit = cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 30, 0.01);
   const bool learned = neural_flow && id0 == id1;
   const bool gyro = gyro_mode!="none" && id0==id1 && gyro_trackers.at(id0)->valid();
   if (gyro) gyro_trackers.at(id0)->seed(pts0,pts1);
@@ -1074,7 +1092,7 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::
       }
     }
   } else {
-    cv::calcOpticalFlowPyrLK(img0pyr, img1pyr, pts0, pts1, mask_klt, error, win_size, pyr_levels, term_crit, cv::OPTFLOW_USE_INITIAL_FLOW);
+    optical_flow(img0pyr,img1pyr,pts0,pts1,mask_klt,error,id0);
   }
   if (gyro && feature_ids && gyro_mode!="seed")
     gyro_trackers.at(id0)->refine(gyro_raw_last.at(id0),gyro_raw_current.at(id0),pts0,*feature_ids,pts1,mask_klt,error);
@@ -1098,8 +1116,7 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::
       }
       std::vector<uchar> reverse_status;
       std::vector<float> reverse_error;
-      cv::calcOpticalFlowPyrLK(img1pyr, img0pyr, forward, backward, reverse_status, reverse_error, win_size, pyr_levels,
-                               term_crit, cv::OPTFLOW_USE_INITIAL_FLOW);
+      optical_flow(img1pyr,img0pyr,forward,backward,reverse_status,reverse_error,id0);
       for (size_t i = 0; i < budget; ++i) {
         const double distance = cv::norm(backward[i] - pts0[candidates[i].second]);
         (*diagnostics)[candidates[i].second].backward = reverse_status[i] && std::isfinite(distance) ? distance : 20.0;
@@ -1125,8 +1142,7 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::
     }
     if (!forward.empty()) {
       std::vector<uchar> reverse_status;
-      cv::calcOpticalFlowPyrLK(img1pyr, img0pyr, forward, backward, reverse_status, error, win_size, pyr_levels, term_crit,
-                               cv::OPTFLOW_USE_INITIAL_FLOW);
+      optical_flow(img1pyr,img0pyr,forward,backward,reverse_status,error,id0);
       const double threshold_squared = max_fb_error * max_fb_error;
       for (size_t i = 0; i < indices.size(); ++i) {
         const auto delta = backward[i] - pts0[indices[i]];

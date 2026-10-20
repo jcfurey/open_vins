@@ -392,6 +392,45 @@ Ground truth is consumed only by the scorer. The tests cover distorted point and
 patch projection, subpixel motion with brightness changes, template ownership,
 stereo feeds, bias/time-offset handling, and preservation of the filter state.
 
+### Optional CUDA sparse KLT
+
+`klt_flow_backend: cpu` remains the default. Build `ov_core` with
+`-DENABLE_CUDA_KLT=ON`, then rebuild `ov_init` and `ov_msckf` against that same
+install. Select `klt_flow_backend: cuda` and `klt_cuda_device: 0` at startup.
+This independent native-grayscale backend can also accept gyro initial guesses.
+Learned frontends are currently unsupported with CUDA KLT. Windows must be odd,
+3..31 pixels, with pyramid levels 0..8. A requested unavailable backend fails
+explicitly; it never silently selects CPU tracking.
+
+The private `ov_klt_cuda` component uses the CUDA runtime through a small C ABI,
+so a CUDA-enabled OpenCV build is unnecessary. Host images, camera models,
+detection, geometric rejection and estimator updates use the existing ROS/OpenCV
+libraries. Each camera owns its CUDA stream and reusable buffers. The GPU builds
+Gaussian pyramids/Scharr derivatives and runs sparse inverse-compositional LK;
+uploads, downloads and stream synchronization are included in timing. Numeric
+results need not be identical to CPU OpenCV LK, so accuracy is evaluated separately.
+`ENABLE_CUDA_KLT=OFF` builds require no CUDA toolkit or runtime.
+
+The local RTX 3090 build uses CUDA 13.4, CMake 3.18 or newer and architecture 86:
+
+```bash
+colcon --log-base .colcon/open-vins-cuda/log build --base-paths src/open_vins \
+  --packages-select ov_core ov_init ov_msckf --executor sequential \
+  --build-base .colcon/open-vins-cuda/build --install-base .colcon/open-vins-cuda/install \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DENABLE_CUDA_KLT=ON \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-13.4/bin/nvcc \
+  -DCUDAToolkit_ROOT=/usr/local/cuda-13.4 -DCMAKE_CUDA_ARCHITECTURES=86
+```
+
+Select a compatible toolkit/compiler and architecture for other hosts. The SDK
+runtime must remain available at its configured path. GPU tests cover subpixel
+motion, non-contiguous host images, resizing, failed/empty tracks, concurrent
+camera streams, CPU comparison and stereo/gyro integration. NVIDIA memcheck and
+racecheck logs are retained in the workspace study. The helper
+`scripts/benchmark_open_vins_cuda.py --output <directory>` compares CPU/CUDA twice
+on all five full Machine Hall flights, with gyro assistance disabled in both arms.
+These acceleration results do not establish an accuracy gain.
+
 ### Regression checks
 
 Build with `-DBUILD_TESTING=ON`, then run from the workspace root:

@@ -469,8 +469,14 @@ struct VioManagerOptions {
   int letnet_inference_threads = 4;
   std::string gyro_klt_mode = "none";
   int gyro_klt_reference_age = 20;
+  std::string klt_flow_backend = "cpu";
+  int klt_cuda_device = 0;
 
   void configure_tracking() const {
+    if (klt_flow_backend!="cpu" && klt_flow_backend!="cuda")
+      throw std::invalid_argument("klt_flow_backend must be cpu or cuda");
+    if (klt_cuda_device<0 || (klt_flow_backend=="cuda" && (!use_klt || tracking_backend!="native" || klt_window_size>31)))
+      throw std::invalid_argument("CUDA KLT requires native grayscale KLT, an odd window no larger than 31 and a nonnegative device");
     if ((gyro_klt_mode!="none" && gyro_klt_mode!="seed" && gyro_klt_mode!="affine" && gyro_klt_mode!="reference") ||
         gyro_klt_reference_age<1 || gyro_klt_reference_age>100)
       throw std::invalid_argument("gyro_klt_mode must be none, seed, affine or reference; reference age must be 1..100 frames");
@@ -583,6 +589,8 @@ struct VioManagerOptions {
       parser->parse_config("klt_ransac_valid_only", klt_ransac_valid_only, false);
       parser->parse_config("gyro_klt_mode", gyro_klt_mode, false);
       parser->parse_config("gyro_klt_reference_age", gyro_klt_reference_age, false);
+      parser->parse_config("klt_flow_backend", klt_flow_backend, false);
+      parser->parse_config("klt_cuda_device", klt_cuda_device, false);
       parser->parse_config("tracking_backend", tracking_backend, false);
       parser->parse_config("kltnet_model_path", kltnet_model_path, false);
       parser->parse_config("kltnet_target", kltnet_target, false);
