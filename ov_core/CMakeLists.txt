@@ -38,7 +38,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif ()
-add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fno-signed-zeros;-fno-math-errno;-funroll-loops;-Wall;-Wuninitialized;-fno-omit-frame-pointer>")
+# Preserve signed zeros: Eigen's SIMD fixed-size inverse uses their sign bits.
+add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fno-math-errno;-funroll-loops;-Wall;-Wuninitialized;-fno-omit-frame-pointer>")
 
 # Find our ROS version!
 # NOTE: Default to using the ROS1 package if both are in our enviroment

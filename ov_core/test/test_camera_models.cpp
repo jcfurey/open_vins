@@ -43,3 +43,19 @@ TEST(CameraModels, BatchedEquidistantUndistortionMatchesSinglePoints) {
   camera.set_value(intrinsics);
   expect_batch_matches_single_points(camera);
 }
+
+TEST(RigidTransformMath, FixedSizeInversePreservesIdentityAndRigidPose) {
+  // Eigen's SIMD 4x4 inverse requires signed-zero semantics. With GCC 15 and
+  // -fno-signed-zeros even I.inverse() had alternating negative diagonal entries.
+  const Eigen::Matrix4d identity=Eigen::Matrix4d::Identity();
+  EXPECT_TRUE(identity.inverse().isApprox(identity,1e-14));
+  Eigen::Matrix4d pose=identity;
+  pose.topLeftCorner<3,3>()=Eigen::AngleAxisd(.23,Eigen::Vector3d(1,2,3).normalized()).toRotationMatrix();
+  pose.topRightCorner<3,1>()=Eigen::Vector3d(.2,-.3,1.1);
+  Eigen::Matrix4d expected=identity;
+  expected.topLeftCorner<3,3>()=pose.topLeftCorner<3,3>().transpose();
+  expected.topRightCorner<3,1>()=-expected.topLeftCorner<3,3>()*pose.topRightCorner<3,1>();
+  EXPECT_TRUE(pose.inverse().isApprox(expected,1e-13));
+  EXPECT_TRUE((pose*pose.inverse()).isApprox(identity,1e-13));
+  EXPECT_TRUE(identity.cast<float>().eval().inverse().isApprox(Eigen::Matrix4f::Identity(),1e-6f));
+}
