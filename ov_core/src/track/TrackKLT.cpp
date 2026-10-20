@@ -34,12 +34,12 @@
 
 using namespace ov_core;
 
-void TrackKLT::set_letnet_tracker(const std::string &model_path, double minimum_score) {
+void TrackKLT::set_letnet_tracker(const std::string &model_path, double minimum_score, const std::string &engine, int threads) {
   if (histogram_method != HistogramMethod::NONE || neural_flow || observation_uncertainty)
     throw std::invalid_argument("LET-Net requires histogram_method=NONE and a separate native covariance/KLTNet selection");
   if (!std::isfinite(minimum_score) || minimum_score < 0 || minimum_score > 1)
     throw std::invalid_argument("letnet_min_score must be in [0,1]");
-  learned_features = std::make_shared<LearnedFeatures>(model_path);
+  learned_features = std::make_shared<LearnedFeatures>(model_path, engine, threads);
   letnet_minimum_score = minimum_score;
   for (const auto &camera : camera_calib) {
     score_current[camera.first];

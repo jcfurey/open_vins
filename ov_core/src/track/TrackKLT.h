@@ -92,7 +92,7 @@ public:
   void set_neural_tracker(const std::string &model_path, const std::string &target, double min_confidence);
 
   /// Use LET-Net corner scores and learned image features for detection and temporal/stereo LK.
-  void set_letnet_tracker(const std::string &model_path, double minimum_score);
+  void set_letnet_tracker(const std::string &model_path, double minimum_score, const std::string &engine = "opencv", int threads = 4);
 
 protected:
   /// One camera's tracking result. New features carry pending ids until commit_monocular() applies the result.

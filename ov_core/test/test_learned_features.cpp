@@ -53,7 +53,7 @@ public:
 };
 } // namespace
 
-TEST(LearnedFeatures, StereoTracksKnownPixelMotionUsingLearnedFeaturesWhileRetainingRawViews) {
+static void verify_stereo_motion(const std::string &engine) {
   cv::setNumThreads(2);
   std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras;
   for (size_t id = 0; id < 2; ++id) {
@@ -64,7 +64,7 @@ TEST(LearnedFeatures, StereoTracksKnownPixelMotionUsingLearnedFeaturesWhileRetai
     cameras[id] = camera;
   }
   Tracker tracker(cameras, 150, 0, true, TrackBase::NONE, 10, 4, 4, 6, 3, 15);
-  tracker.set_letnet_tracker(LETNET_TEST_MODEL, .2);
+  tracker.set_letnet_tracker(LETNET_TEST_MODEL, .2, engine, 4);
   cv::Mat texture(280, 380, CV_8U);
   cv::RNG random(22);
   random.fill(texture, cv::RNG::UNIFORM, 0, 256);
@@ -105,6 +105,23 @@ TEST(LearnedFeatures, StereoTracksKnownPixelMotionUsingLearnedFeaturesWhileRetai
   ASSERT_GT(matched, 100u);
   EXPECT_LT(std::sqrt(squared_error / matched), .3);
 }
+TEST(LearnedFeatures, StereoTracksKnownPixelMotionUsingLearnedFeaturesWhileRetainingRawViews) { verify_stereo_motion("opencv"); }
+#if ENABLE_LETNET_ONNXRUNTIME
+TEST(LearnedFeatures, OnnxRuntimePreservesModelPredictionsAndOutputOwnership) {
+  LearnedFeatures reference(LETNET_TEST_MODEL), runtime(LETNET_TEST_MODEL, "onnxruntime", 4);
+  cv::Mat image(240, 320, CV_8U);
+  cv::RNG rng(91);
+  rng.fill(image, cv::RNG::UNIFORM, 0, 256);
+  const auto expected = reference.infer(image);
+  const auto actual = runtime.infer(image);
+  EXPECT_LE(cv::norm(expected.tracking, actual.tracking, cv::NORM_INF), 1);
+  EXPECT_LT(cv::norm(expected.score, actual.score, cv::NORM_INF), 5e-5);
+  const auto saved = actual.score.clone();
+  runtime.infer(cv::Mat::zeros(128, 192, CV_8U));
+  EXPECT_EQ(cv::norm(actual.score, saved, cv::NORM_INF), 0);
+}
+TEST(LearnedFeatures, OnnxRuntimeStereoTracksKnownPixelMotion) { verify_stereo_motion("onnxruntime"); }
+#endif
 #elif !ENABLE_LETNET_ONNX
 TEST(LearnedFeatures, DisabledBuildRejectsModelSelectionExplicitly) {
   EXPECT_FALSE(LearnedFeatures::available());

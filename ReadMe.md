@@ -244,7 +244,8 @@ intensity for temporal and stereo LK. Raw grayscale images remain available for
 visualization. All inference and tracking run in C++; no Python runtime is added
 to the estimator. Camera resolution, pixel coordinates and calibration are retained.
 
-Build with `-DENABLE_LETNET_ONNX=ON` and rebuild all three VIO packages. Set
+Build the requested inference engine (`ENABLE_LETNET_ONNX` for OpenCV,
+`ENABLE_LETNET_ONNXRUNTIME` for the CPU SDK) and rebuild all three VIO packages. Set
 `histogram_method: NONE`, `letnet_model_path` to the prepared graph, and optionally
 `letnet_min_score` (default 0.2, range [0,1]). The score cutoff is an empirical
 corner-selection threshold, not a calibrated measurement uncertainty. The
@@ -268,6 +269,33 @@ histogram KLT, raw-image KLT and LET-Net at 1×, with equal thread counts and de
 estimator budgets. It fingerprints the real model and all three loaded libraries,
 preserves failures, and uses ground truth only for scoring. Runtime/accuracy must
 be qualified on the target machine; the optional frontend is disabled by default.
+
+For lower-overhead CPU inference, build with `-DENABLE_LETNET_ONNXRUNTIME=ON`
+and `-DONNXRUNTIME_ROOT=<CPU SDK prefix>`, then select
+`letnet_inference_backend: onnxruntime`. `letnet_inference_threads` defaults to
+4 and bounds the runtime's private intra-operator pool independently of
+`num_opencv_threads`; idle worker spinning is disabled. The same FP32 ONNX model
+and trained weights are used, without quantization or image resizing. Real-model
+tests compare its scores/features against OpenCV within floating-point precision
+and verify stereo motion and output ownership. The SDK shared library must remain
+available at the configured install path. Missing requested engines fail explicitly.
+
+The original `letnet_inference_backend: opencv` remains selectable (built with
+`ENABLE_LETNET_ONNX`). Its five full 1× Machine Hall flights exceeded the latency
+gate and caused queue-overflow resets on this host, so the short pilot did not
+qualify it for full-flight playback. The workspace report retains those failures.
+Use `benchmark_open_vins_learned.py --engine onnxruntime --inference-threads 4`
+with the matching install to validate the faster path. The validated CPU SDK for
+this integration is the official ONNX Runtime 1.23.2 release.
+
+The completed faster-engine screen kept up with all five full Machine Hall
+flights at 1×: zero dropped inputs/resets and maximum P95 pose age 0.112 s.
+Mean ATE was 12.62 cm for LET-Net versus 10.44 cm for fresh matched histogram
+KLT controls. Results were mixed across sequences, so native remains the default.
+The template selects the faster CPU engine and requires its SDK/build option.
+The real-model comparison passes 104 VIO tests; the disabled core passes 24.
+All failed OpenCV-DNN flights and a separately rerun paused-player startup are
+retained in the workspace report. No repeatable accuracy gain is established.
 
 The optional `kltnet_onnx` frontend loads a **complete trained sparse tracker**
 through OpenCV DNN. It retains each feature's original reference patch and previous

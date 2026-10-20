@@ -1,5 +1,6 @@
-# Requires a prepared author-trained grayscale LET-Net graph; see prepare_open_vins_letnet.py.
-# Supply letnet_model_path. Full camera resolution and pixel coordinates are retained.
+# Requires a prepared author-trained LET-Net graph and ENABLE_LETNET_ONNXRUNTIME=ON.
+# Configure ONNXRUNTIME_ROOT to the CPU SDK. Set letnet_model_path to the prepared model.
+# Full camera resolution and pixel coordinates are retained; native remains the default frontend.
 /**:
   ros__parameters:
     init_dyn_min_features: 25
@@ -38,3 +39,5 @@
     letnet_min_score: 0.2
     visual_update_backend: standard
     histogram_method: NONE
+    letnet_inference_backend: onnxruntime
+    letnet_inference_threads: 4

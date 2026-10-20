@@ -465,6 +465,8 @@ struct VioManagerOptions {
   double kltnet_min_confidence = 0.1;
   std::string letnet_model_path;
   double letnet_min_score = 0.2;
+  std::string letnet_inference_backend = "opencv";
+  int letnet_inference_threads = 4;
 
   void configure_tracking() const {
     if (tracking_backend != "native" && tracking_backend != "kltnet_onnx" && tracking_backend != "letnet_onnx")
@@ -474,6 +476,9 @@ struct VioManagerOptions {
         throw std::invalid_argument("letnet_onnx requires use_klt=true, histogram_method=NONE and a prepared letnet_model_path");
       if (!std::isfinite(letnet_min_score) || letnet_min_score < 0 || letnet_min_score > 1)
         throw std::invalid_argument("letnet_min_score must be in [0,1]");
+      if ((letnet_inference_backend != "opencv" && letnet_inference_backend != "onnxruntime") ||
+          letnet_inference_threads < 1 || letnet_inference_threads > 64)
+        throw std::invalid_argument("LET-Net inference backend must be opencv or onnxruntime, with 1..64 inference threads");
       if (msckf_options.use_observation_covariance)
         throw std::invalid_argument("RDIC photometric covariance currently expects native grayscale LK; select standard or fej2 with LET-Net");
     }
@@ -575,6 +580,8 @@ struct VioManagerOptions {
       parser->parse_config("kltnet_min_confidence", kltnet_min_confidence, false);
       parser->parse_config("letnet_model_path", letnet_model_path, false);
       parser->parse_config("letnet_min_score", letnet_min_score, false);
+      parser->parse_config("letnet_inference_backend", letnet_inference_backend, false);
+      parser->parse_config("letnet_inference_threads", letnet_inference_threads, false);
       std::string histogram_method_str = "HISTOGRAM";
       parser->parse_config("histogram_method", histogram_method_str);
       if (histogram_method_str == "NONE") {
