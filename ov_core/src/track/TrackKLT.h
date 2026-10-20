@@ -28,6 +28,7 @@
 #include "LearnedFeatures.h"
 #include "GyroKLT.h"
 #include "CudaKLT.h"
+#include "StereoKLT.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -99,6 +100,13 @@ public:
   /// Configure before feeding frames. Predictions are supplied serially by the estimator, without updating its state.
   void set_gyro_mode(const std::string &mode, int reference_age = 20);
   void set_flow_backend(const std::string &backend, int device = 0);
+  void set_stereo_consistency(const std::string &mode,const std::map<size_t,Eigen::VectorXd> &extrinsics,
+                              double epipolar=1.5,double backward=.75,double refinement=2);
+  void set_stereo_active(bool active) {stereo_active=active;}
+  void update_stereo_extrinsics(const std::map<size_t,Eigen::VectorXd> &extrinsics) {
+    if(stereo_consistency)stereo_consistency->update_extrinsics(extrinsics);
+  }
+  StereoKLT::Statistics stereo_statistics() const {return stereo_consistency ? stereo_consistency->statistics() : StereoKLT::Statistics();}
   double last_frame_time(size_t camera) const { return frame_times.at(camera); }
   void set_gyro_predictions(double timestamp, const std::map<size_t, Eigen::Matrix3d> &rotations) {
     prediction_timestamp = timestamp;
@@ -244,6 +252,12 @@ protected:
   void advance_buffers(size_t camera);
   std::map<size_t, Eigen::Matrix4d> quality_extrinsics;
   std::map<size_t, std::unordered_map<size_t, size_t>> quality_ages;
+  std::unique_ptr<StereoKLT> stereo_consistency;
+  bool stereo_active=true;
+  size_t stereo_frames=0;
+  void validate_stereo(const std::vector<cv::Mat> &left_pyramid,const std::vector<cv::Mat> &right_pyramid,
+                        size_t left_camera,size_t right_camera,const std::vector<cv::Point2f> &left,
+                        std::vector<cv::Point2f> &right,std::vector<uchar> &status,bool fresh);
 
   // Two independent image/pyramid buffers per camera, swapped after tracking.
   // Never overwrite the previous frame while optical flow still references it.

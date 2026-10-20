@@ -394,6 +394,37 @@ Ground truth is consumed only by the scorer. The tests cover distorted point and
 patch projection, subpixel motion with brightness changes, template ownership,
 stereo feeds, bias/time-offset handling, and preservation of the filter state.
 
+Signed-zero floating-point semantics are retained for Eigen SIMD. A regression
+test covers fixed-size homogeneous inverses: GCC 15 with the former
+`-fno-signed-zeros` flag inverted even the 4×4 identity incorrectly. Normal
+Release optimization remains enabled.
+
+### Optional calibrated stereo consistency
+
+`stereo_klt_mode` defaults to `none`. `epipolar` checks new and existing shared
+stereo observations against the calibrated camera-to-camera transform. Its
+symmetric epipolar distance uses each lens model's distortion Jacobian, so
+`stereo_klt_epipolar_px` is expressed in original image pixels (default 1.5).
+`refine` additionally tracks current left patches into the right image, seeded
+by the right camera's temporal predictions, and verifies a reverse match. Fresh
+matches reuse the forward flow already computed during detection. The defaults
+are `stereo_klt_backward_px: 0.75` and `stereo_klt_refinement_px: 2.0`.
+
+The estimator enables assistance after native initialization. A rejected existing
+pair contributes neither current observation under its disputed shared feature
+ID; its valid history remains available for the filter. A rejected fresh stereo
+match can still create a left-only track. A failed refinement never changes the
+original right pixel. Independent monocular observations continue normally.
+Extrinsics are refreshed if online camera-pose calibration is enabled; intrinsics
+come from the current camera models. No ground truth enters tracking or estimation.
+
+These modes require two native stereo cameras and standard observation noise.
+Both CPU and CUDA flow backends are supported. `[STEREO-KLT]` counters record
+checked, accepted, refined and rejected pairs. The opt-in CUDA presets are
+`ros2_euroc_cuda_stereo_geometry.yaml` and `ros2_euroc_cuda_stereo_refine.yaml`.
+The workspace `benchmark_open_vins_stereo.py` compares the modes and larger
+feature budgets at 1×; all gates and failed attempts are retained.
+
 ### Optional CUDA sparse KLT
 
 `klt_flow_backend: cpu` remains the default. Build `ov_core` with

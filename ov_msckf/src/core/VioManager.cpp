@@ -143,6 +143,11 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
                                                                             params.camera_extrinsics);
     std::static_pointer_cast<TrackKLT>(trackFEATS)->set_gyro_mode(params.gyro_klt_mode,params.gyro_klt_reference_age);
     std::static_pointer_cast<TrackKLT>(trackFEATS)->set_flow_backend(params.klt_flow_backend,params.klt_cuda_device);
+    std::static_pointer_cast<TrackKLT>(trackFEATS)->set_stereo_consistency(params.stereo_klt_mode,params.camera_extrinsics,
+        params.stereo_klt_epipolar_px,params.stereo_klt_backward_px,params.stereo_klt_refinement_px);
+    std::static_pointer_cast<TrackKLT>(trackFEATS)->set_stereo_active(false);
+    if(params.stereo_klt_mode!="none") PRINT_INFO("[STEREO-KLT] selected mode=%s epipolar=%.2f backward=%.2f refinement=%.2f\n",
+        params.stereo_klt_mode.c_str(),params.stereo_klt_epipolar_px,params.stereo_klt_backward_px,params.stereo_klt_refinement_px);
     if (params.klt_flow_backend=="cuda")
       PRINT_INFO("[CUDA-KLT] device=%d name=%s runtime=%d compiled=%d\n",params.klt_cuda_device,
                  CudaKLT::device_name(params.klt_cuda_device).c_str(),CudaKLT::runtime_version(),CudaKLT::compiled_version());
@@ -313,12 +318,17 @@ void VioManager::track_image_and_update(const ov_core::CameraData &message_const
   }
 
   // Perform our feature tracking!
-  if (params.use_klt && params.msckf_options.use_observation_covariance && state->_options.do_calib_camera_pose) {
+  if (params.use_klt && (params.msckf_options.use_observation_covariance || params.stereo_klt_mode!="none") &&
+      state->_options.do_calib_camera_pose) {
     std::map<size_t, Eigen::VectorXd> extrinsics;
     for (const auto &camera : state->_calib_IMUtoCAM)
       extrinsics[camera.first] = camera.second->value();
-    std::static_pointer_cast<TrackKLT>(trackFEATS)->set_observation_uncertainty(true, extrinsics);
+    if(params.msckf_options.use_observation_covariance)
+      std::static_pointer_cast<TrackKLT>(trackFEATS)->set_observation_uncertainty(true, extrinsics);
+    if(params.stereo_klt_mode!="none")std::static_pointer_cast<TrackKLT>(trackFEATS)->update_stereo_extrinsics(extrinsics);
   }
+  if(params.use_klt&&params.stereo_klt_mode!="none")
+    std::static_pointer_cast<TrackKLT>(trackFEATS)->set_stereo_active(is_initialized_vio);
   if (params.use_klt && params.gyro_klt_mode!="none") {
     auto tracker=std::static_pointer_cast<TrackKLT>(trackFEATS);
     std::map<size_t,Eigen::Matrix3d> rotations;

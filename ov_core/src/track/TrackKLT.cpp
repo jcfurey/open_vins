@@ -34,6 +34,25 @@
 
 using namespace ov_core;
 
+void TrackKLT::set_stereo_consistency(const std::string &mode,const std::map<size_t,Eigen::VectorXd> &extrinsics,
+                                     double epipolar,double backward,double refinement) {
+  if(mode=="none") {stereo_consistency.reset();return;}
+  if(!use_stereo||neural_flow||learned_features||observation_uncertainty)
+    throw std::invalid_argument("Stereo consistency requires native stereo KLT with standard observation noise");
+  stereo_consistency=std::make_unique<StereoKLT>(camera_calib,mode,extrinsics,epipolar,backward,refinement);
+}
+void TrackKLT::validate_stereo(const std::vector<cv::Mat> &left_pyramid,const std::vector<cv::Mat> &right_pyramid,
+                               size_t left_camera,size_t right_camera,const std::vector<cv::Point2f> &left,
+                               std::vector<cv::Point2f> &right,std::vector<uchar> &status,bool fresh) {
+  if(!stereo_consistency||!stereo_active)return;
+  stereo_consistency->check(left_camera,right_camera,left,right,status,
+    [&](const std::vector<cv::Point2f> &from,std::vector<cv::Point2f> &to,std::vector<uchar> &mask,bool reverse) {
+      std::vector<float> error;
+      optical_flow(reverse?right_pyramid:left_pyramid,reverse?left_pyramid:right_pyramid,from,to,mask,error,
+                   reverse?right_camera:left_camera);
+    },fresh);
+}
+
 void TrackKLT::set_flow_backend(const std::string &backend, int device) {
   if (backend!="cpu" && backend!="cuda") throw std::invalid_argument("klt_flow_backend must be cpu or cuda");
   cuda_flows.clear();
@@ -225,6 +244,10 @@ void TrackKLT::feed_new_camera(const CameraData &message) {
       PRINT_INFO("[GYRO-KLT] mode=%s predicted=%zu refined=%zu reference=%zu fallback=%zu missing_frames=%zu\n",
                  gyro_mode.c_str(),total.predictions,total.refinements,total.references,total.rejected,total.missing_frames);
     }
+  }
+  if(stereo_consistency&&++stereo_frames%200==0) {
+    const auto s=stereo_consistency->statistics();
+    PRINT_INFO("[STEREO-KLT] checked=%zu accepted=%zu refined=%zu rejected=%zu\n",s.checked,s.accepted,s.refined,s.rejected);
   }
 }
 
@@ -421,11 +444,30 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   //===================================================================================
   //===================================================================================
 
-  // left to right matching
-  // TODO: we should probably still do this to reject outliers
-  // TODO: maybe we should collect all tracks that are in both frames and make they pass this?
-  // std::vector<uchar> mask_lr;
-  // perform_matching(imgpyr_left, imgpyr_right, pts_left_new, pts_right_new, cam_id_left, cam_id_right, mask_lr);
+  std::unordered_map<size_t,size_t> right_indices;
+  right_indices.reserve(ids_right_old.size());
+  for(size_t i=0;i<ids_right_old.size();++i)right_indices.emplace(ids_right_old[i],i);
+  if(stereo_consistency&&stereo_active) {
+    std::vector<size_t> left_indices,right_matches;
+    std::vector<cv::Point2f> left,right;
+    for(size_t i=0;i<pts_left_new.size();++i) {
+      const auto found=right_indices.find(ids_left_old[i]);
+      if(mask_ll[i]&&found!=right_indices.end()&&mask_rr[found->second]) {
+        left_indices.push_back(i);right_matches.push_back(found->second);
+        left.push_back(pts_left_new[i].pt);right.push_back(pts_right_new[found->second].pt);
+      }
+    }
+    std::vector<uchar> status(left.size(),1);
+    validate_stereo(imgpyr_left,imgpyr_right,cam_id_left,cam_id_right,left,right,status,false);
+    for(size_t j=0;j<left.size();++j) {
+      if(status[j])pts_right_new[right_matches[j]].pt=right[j];
+      else {
+        // Neither current observation is committed under a disputed shared ID.
+        // Valid historical measurements remain in the database for the filter.
+        mask_ll[left_indices[j]]=0;mask_rr[right_matches[j]]=0;
+      }
+    }
+  }
   rT5 = boost::posix_time::microsec_clock::local_time();
 
   //===================================================================================
@@ -455,10 +497,6 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   std::vector<size_t> good_ids_left, good_ids_right;
 
   // Keep original track order, with constant-time ID lookup in the other camera.
-  std::unordered_map<size_t, size_t> right_indices;
-  right_indices.reserve(ids_right_old.size());
-  for (size_t i = 0; i < ids_right_old.size(); ++i)
-    right_indices.emplace(ids_right_old[i], i);
   std::unordered_set<size_t> added_right_ids;
   added_right_ids.reserve(ids_right_old.size());
 
@@ -878,6 +916,7 @@ void TrackKLT::perform_detection_stereo(const std::vector<cv::Mat> &img0pyr, con
       // perform_matching(img0pyr, img1pyr, kpts0_new, kpts1_new, cam_id_left, cam_id_right, mask);
       std::vector<float> error;
       optical_flow(img0pyr,img1pyr,pts0_new,pts1_new,mask,error,cam_id_left);
+      validate_stereo(img0pyr,img1pyr,cam_id_left,cam_id_right,pts0_new,pts1_new,mask,true);
 
       // Loop through and record only ones that are valid
       for (size_t i = 0; i < pts0_new.size(); i++) {

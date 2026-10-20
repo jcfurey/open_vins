@@ -40,6 +40,7 @@ list(APPEND LIBRARY_SOURCES
         src/track/TrackDescriptor.cpp
         src/track/TrackKLT.cpp
         src/track/GyroKLT.cpp
+        src/track/StereoKLT.cpp
         src/track/CudaKLT.cpp
         src/track/TrackQuality.cpp
         src/track/NeuralFlow.cpp
@@ -104,6 +105,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_camera_models ov_core_lib)
     ament_add_gtest(test_klt_buffers test/test_klt_buffers.cpp)
     target_link_libraries(test_klt_buffers ov_core_lib)
+    ament_add_gtest(test_stereo_klt test/test_stereo_klt.cpp)
+    target_link_libraries(test_stereo_klt ov_core_lib)
     ament_add_gtest(test_gyro_klt test/test_gyro_klt.cpp)
     target_link_libraries(test_gyro_klt ov_core_lib)
     ament_add_gtest(test_cuda_klt test/test_cuda_klt.cpp)

@@ -94,6 +94,8 @@ TEST(CudaKlt, StereoTrackerPreservesCorrespondencesAndSupportsGyroSeeding) {
   }
   ov_core::TrackKLT tracker(cameras,120,0,true,ov_core::TrackBase::HISTOGRAM,10,4,3,8,3,15);
   tracker.set_gyro_mode("seed");tracker.set_flow_backend("cuda");const auto base=texture();
+  Eigen::VectorXd left_pose(7);left_pose<<0,0,0,1,0,0,0;auto right_pose=left_pose;right_pose(4)=-.1;
+  tracker.set_stereo_consistency("refine",{{0,left_pose},{1,right_pose}});
   for(int i=0;i<8;++i) {
     ov_core::CameraData data;data.timestamp=1+.05*i;data.sensor_ids={0,1};
     data.images={translated(base,.3*i,0),translated(base,-4+.3*i,0)};
@@ -102,5 +104,6 @@ TEST(CudaKlt, StereoTrackerPreservesCorrespondencesAndSupportsGyroSeeding) {
     tracker.feed_new_camera(data);
   }
   EXPECT_GT(tracker.get_last_ids().at(0).size(),40u);EXPECT_GT(tracker.get_last_ids().at(1).size(),40u);
+  EXPECT_GT(tracker.stereo_statistics().refined,100u);
 }
 #endif

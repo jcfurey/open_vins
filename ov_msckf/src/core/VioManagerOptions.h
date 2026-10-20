@@ -471,8 +471,21 @@ struct VioManagerOptions {
   int gyro_klt_reference_age = 20;
   std::string klt_flow_backend = "cpu";
   int klt_cuda_device = 0;
+  std::string stereo_klt_mode = "none";
+  double stereo_klt_epipolar_px = 1.5;
+  double stereo_klt_backward_px = .75;
+  double stereo_klt_refinement_px = 2;
 
   void configure_tracking() const {
+    if(stereo_klt_mode!="none"&&stereo_klt_mode!="epipolar"&&stereo_klt_mode!="refine")
+      throw std::invalid_argument("stereo_klt_mode must be none, epipolar or refine");
+    if(!std::isfinite(stereo_klt_epipolar_px)||stereo_klt_epipolar_px<=0||
+       !std::isfinite(stereo_klt_backward_px)||stereo_klt_backward_px<=0||
+       !std::isfinite(stereo_klt_refinement_px)||stereo_klt_refinement_px<=0)
+      throw std::invalid_argument("Stereo KLT pixel thresholds must be finite and positive");
+    if(stereo_klt_mode!="none"&&(!use_klt||!use_stereo||state_options.num_cameras!=2||
+                               tracking_backend!="native"||msckf_options.use_observation_covariance))
+      throw std::invalid_argument("Stereo KLT requires two native stereo cameras and standard observation noise");
     if (klt_flow_backend!="cpu" && klt_flow_backend!="cuda")
       throw std::invalid_argument("klt_flow_backend must be cpu or cuda");
     if (klt_cuda_device<0 || (klt_flow_backend=="cuda" && (!use_klt || tracking_backend!="native" || klt_window_size>31)))
@@ -591,6 +604,10 @@ struct VioManagerOptions {
       parser->parse_config("gyro_klt_reference_age", gyro_klt_reference_age, false);
       parser->parse_config("klt_flow_backend", klt_flow_backend, false);
       parser->parse_config("klt_cuda_device", klt_cuda_device, false);
+      parser->parse_config("stereo_klt_mode", stereo_klt_mode, false);
+      parser->parse_config("stereo_klt_epipolar_px", stereo_klt_epipolar_px, false);
+      parser->parse_config("stereo_klt_backward_px", stereo_klt_backward_px, false);
+      parser->parse_config("stereo_klt_refinement_px", stereo_klt_refinement_px, false);
       parser->parse_config("tracking_backend", tracking_backend, false);
       parser->parse_config("kltnet_model_path", kltnet_model_path, false);
       parser->parse_config("kltnet_target", kltnet_target, false);
