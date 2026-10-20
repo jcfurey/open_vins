@@ -425,6 +425,23 @@ checked, accepted, refined and rejected pairs. The opt-in CUDA presets are
 The workspace `benchmark_open_vins_stereo.py` compares the modes and larger
 feature budgets at 1×; all gates and failed attempts are retained.
 
+The 20 October 2026 development screen did not qualify either stereo mode,
+larger feature budgets, longer estimator windows, or corrected RDIC. A lower
+0.7 px observation-noise setting qualified on MH04/05 but failed the subsequent
+five-sequence, two-repeat comparison: 8.94 cm mean position ATE versus 8.61 cm
+for fresh corrected-CUDA controls and 7.76 cm for the preserved previous build.
+It improved MH02/04 and regressed on MH01/03/05. All thirty confirmation flights
+passed the unchanged delivery, continuity, coverage, error and 500 ms P95 pose-age
+gates, with no dropped inputs or resets. This round establishes no further
+trajectory accuracy gain. The signed-zero correction is independently required
+for valid matrix arithmetic; optional tracking settings remain disabled.
+
+The corrected core/initializer/estimator build passes 123 tests, including
+actual-GPU cases; the CPU-only core passes 40. NVIDIA checks report zero memory
+errors and race hazards. Exact source/library fingerprints, every pilot, repeat
+ranges and frozen selection criteria are retained in the workspace
+`results/open_vins_stereo_accuracy_2026-10-20/REPORT.html`.
+
 ### Optional CUDA sparse KLT
 
 `klt_flow_backend: cpu` remains the default. Build `ov_core` with
