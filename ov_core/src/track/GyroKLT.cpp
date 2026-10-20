@@ -211,8 +211,8 @@ void GyroKLT::refine(const std::vector<cv::Mat> &previous_raw, const std::vector
                      const std::vector<cv::Point2f> &previous, const std::vector<size_t> &ids,
                      std::vector<cv::Point2f> &current, std::vector<uchar> &status, std::vector<float> &error) {
   if (!prediction_valid || mode=="seed" || previous_raw.empty() || current_raw.empty()) return;
-  if (previous.size()!=ids.size() || current.size()!=ids.size() || status.size()!=ids.size())
-    throw std::invalid_argument("Gyro KLT point/id/status sizes differ");
+  if (previous.size()!=ids.size() || current.size()!=ids.size() || status.size()!=ids.size() || error.size()!=ids.size())
+    throw std::invalid_argument("Gyro KLT point/id/status/error sizes differ");
   std::vector<Reference> local(ids.size());
   std::vector<const Reference *> selected(ids.size(),nullptr);
   std::vector<uchar> retained(ids.size(),0),success(ids.size(),0);
@@ -227,10 +227,10 @@ void GyroKLT::refine(const std::vector<cv::Mat> &previous_raw, const std::vector
   }
   workers->run(ids.size(),[&](size_t i) {
     const Reference *reference=selected[i];if(!reference)return;
-    cv::Point2f prediction,result=current[i]; Eigen::Matrix2d affine;
+    cv::Point2f prediction,result=current[i]; float residual=error[i]; Eigen::Matrix2d affine;
     const Eigen::Matrix3d rotation=orientation*reference->orientation.transpose();
-    success[i]=project(*camera,rotation,reference->point,prediction,&affine) && align(*reference,current_raw,affine,result,error[i]);
-    if(success[i]) current[i]=result;
+    success[i]=project(*camera,rotation,reference->point,prediction,&affine) && align(*reference,current_raw,affine,result,residual);
+    if(success[i]) {current[i]=result;error[i]=residual;}
   });
   for(size_t i=0;i<ids.size();++i) {
     if(!selected[i])continue;

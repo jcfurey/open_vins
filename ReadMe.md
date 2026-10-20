@@ -372,6 +372,8 @@ remains a pixel in the original image, with translation determined visually.
 `reference` additionally retains owned templates for up to
 `gyro_klt_reference_age` frames (default 20). A failed old-template alignment
 falls back to the independent frame-to-frame match and clears that reference.
+Rejected fits preserve the native pixel, status and residual together; inconsistent
+point, ID, status or residual vector sizes are rejected before fitting.
 Feature-ID reassignment, dead-track cleanup, image-buffer reuse, and unavailable
 motion are handled explicitly. Cumulative runtime counters show which stages
 actually ran. These are candidate accuracy changes, not established improvements.

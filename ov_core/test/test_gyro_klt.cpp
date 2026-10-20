@@ -102,6 +102,20 @@ TEST(GyroKlt, InvalidRotationAndUnavailablePredictionPreserveNativeInitialGuess)
   EXPECT_THROW(ov_core::GyroKLT(pinhole(),"other",15),std::invalid_argument);
 }
 
+TEST(GyroKlt, RejectedRefinementPreservesNativePointStatusAndResidualTogether) {
+  const auto before=pyramid(texture());auto after=pyramid(before[0]);
+  // Force a late failure: the coarse fit succeeds, but the finest derivative is unusable.
+  after[1]=cv::Mat::zeros(before[0].size(),CV_32FC2);
+  const std::vector<cv::Point2f> previous{{160,120}};auto current=previous;
+  std::vector<uchar> status{1};std::vector<float> error{17};
+  ov_core::GyroKLT tracker(pinhole(),"affine",15);
+  const Eigen::Matrix3d R=Eigen::Matrix3d::Identity();tracker.begin_frame(&R);
+  tracker.refine(before,after,previous,{100},current,status,error);
+  EXPECT_EQ(tracker.statistics().refinements,0u);EXPECT_EQ(tracker.statistics().rejected,1u);
+  EXPECT_EQ(current,previous);EXPECT_EQ(status,(std::vector<uchar>{1}));ASSERT_EQ(error,(std::vector<float>{17}));
+  error.clear();EXPECT_THROW(tracker.refine(before,after,previous,{100},current,status,error),std::invalid_argument);
+}
+
 TEST(GyroKlt, ParallelPatchFitsMatchSerialCoordinatesAndReferenceLifecycleExactly) {
   const auto base=texture();const auto old=points();const auto feature_ids=ids(old.size());
   ov_core::GyroKLT serial(pinhole(),"reference",15,20,1),parallel(pinhole(),"reference",15,20,4);
