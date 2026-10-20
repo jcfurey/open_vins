@@ -185,6 +185,8 @@ struct OvCudaKlt {
   }
 };
 extern "C" int ov_cuda_klt_device_count() {int count=0;return cudaGetDeviceCount(&count)==cudaSuccess?count:0;}
+extern "C" int ov_cuda_klt_runtime_version() {int version=0;return cudaRuntimeGetVersion(&version)==cudaSuccess?version:0;}
+extern "C" int ov_cuda_klt_compiled_version() {return CUDART_VERSION;}
 extern "C" int ov_cuda_klt_device_name(int device,char *name,size_t size) {
   cudaDeviceProp properties{};if(cudaGetDeviceProperties(&properties,device)!=cudaSuccess)return 0;
   message(name,size,properties.name);return 1;
@@ -192,6 +194,8 @@ extern "C" int ov_cuda_klt_device_name(int device,char *name,size_t size) {
 extern "C" OvCudaKlt *ov_cuda_klt_create(int device,int levels,int window,char *out,size_t n) {
   try {
     if(device<0||levels<0||levels>8||window<3||window>31||window%2==0)throw std::invalid_argument("Invalid CUDA KLT device/levels/window");
+    if(ov_cuda_klt_runtime_version()/1000 != CUDART_VERSION/1000)
+      throw std::runtime_error("CUDA runtime major version differs from the compiling toolkit; check library paths");
     auto context=std::make_unique<OvCudaKlt>();context->device=device;context->max_levels=levels;context->window=window;
     checked(cudaSetDevice(device));checked(cudaStreamCreateWithFlags(&context->stream,cudaStreamNonBlocking));
     return context.release();

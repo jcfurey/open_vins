@@ -38,6 +38,7 @@ TEST(CudaKlt, AvailabilityIsExplicitAndNeverSilentlySelectsCpu) {
 #if ENABLE_CUDA_KLT
   if(!ov_core::CudaKLT::available())GTEST_SKIP()<<"CUDA runtime/device unavailable";
   EXPECT_FALSE(ov_core::CudaKLT::device_name().empty());
+  EXPECT_EQ(ov_core::CudaKLT::runtime_version()/1000,ov_core::CudaKLT::compiled_version()/1000);
   EXPECT_THROW(ov_core::CudaKLT(3,33),std::invalid_argument);
 #else
   EXPECT_FALSE(ov_core::CudaKLT::available());

@@ -9,6 +9,8 @@ extern "C" {
 typedef struct OvCudaKlt OvCudaKlt;
 typedef struct { float x,y; } OvCudaPoint;
 int ov_cuda_klt_device_count(void);
+int ov_cuda_klt_runtime_version(void);
+int ov_cuda_klt_compiled_version(void);
 int ov_cuda_klt_device_name(int device,char *name,size_t size);
 OvCudaKlt *ov_cuda_klt_create(int device,int levels,int window,char *message,size_t size);
 void ov_cuda_klt_destroy(OvCudaKlt *context);

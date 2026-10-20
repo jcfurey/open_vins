@@ -24,6 +24,20 @@ CudaKLT::CudaKLT(int levels,int window,int device) : impl(new Impl) {
 #endif
 }
 CudaKLT::~CudaKLT()=default;
+int CudaKLT::runtime_version() {
+#if ENABLE_CUDA_KLT
+  return ov_cuda_klt_runtime_version();
+#else
+  return 0;
+#endif
+}
+int CudaKLT::compiled_version() {
+#if ENABLE_CUDA_KLT
+  return ov_cuda_klt_compiled_version();
+#else
+  return 0;
+#endif
+}
 bool CudaKLT::available() {
 #if ENABLE_CUDA_KLT
   return ov_cuda_klt_device_count()>0;

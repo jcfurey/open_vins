@@ -414,9 +414,9 @@ results need not be identical to CPU OpenCV LK, so accuracy is evaluated separat
 The local RTX 3090 build uses CUDA 13.4, CMake 3.18 or newer and architecture 86:
 
 ```bash
-colcon --log-base .colcon/open-vins-cuda/log build --base-paths src/open_vins \
+colcon --log-base .colcon/open-vins-cuda-sdk/log build --base-paths src/open_vins \
   --packages-select ov_core ov_init ov_msckf --executor sequential \
-  --build-base .colcon/open-vins-cuda/build --install-base .colcon/open-vins-cuda/install \
+  --build-base .colcon/open-vins-cuda-sdk/build --install-base .colcon/open-vins-cuda-sdk/install \
   --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DENABLE_CUDA_KLT=ON \
   -DCMAKE_CUDA_COMPILER=/usr/local/cuda-13.4/bin/nvcc \
   -DCUDAToolkit_ROOT=/usr/local/cuda-13.4 -DCMAKE_CUDA_ARCHITECTURES=86
@@ -430,6 +430,13 @@ racecheck logs are retained in the workspace study. The helper
 `scripts/benchmark_open_vins_cuda.py --output <directory>` compares CPU/CUDA twice
 on all five full Machine Hall flights, with gyro assistance disabled in both arms.
 These acceleration results do not establish an accuracy gain.
+
+The component binds its shared runtime to the compiler toolkit's implicit link
+directories and records compiling/runtime versions at startup. Different runtime
+major versions fail explicitly. The first local build used a cached system CUDA
+12.4 runtime with the 13.4 compiler; that build and its initial flights are kept
+as diagnostics. The primary trial uses a fresh matching-SDK prefix and verifies
+the actual loaded runtime hash and major version for every CUDA flight.
 
 ### Regression checks
 

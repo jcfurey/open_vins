@@ -16,6 +16,8 @@ public:
   CudaKLT &operator=(const CudaKLT &) = delete;
   static bool available();
   static std::string device_name(int device = 0);
+  static int runtime_version();
+  static int compiled_version();
   void calc(const cv::Mat &previous, const cv::Mat &current, const std::vector<cv::Point2f> &points_previous,
             std::vector<cv::Point2f> &points_current, std::vector<uchar> &status, std::vector<float> &error);
 private:

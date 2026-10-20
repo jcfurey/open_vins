@@ -69,10 +69,16 @@ if(ENABLE_CUDA_KLT)
     cmake_policy(SET CMP0074 NEW)
     enable_language(CUDA)
     find_package(CUDAToolkit REQUIRED)
+    # Bind the host runtime to nvcc's toolkit. FindCUDAToolkit may otherwise reuse
+    # a system CUDA_cudart_LIBRARY from a different major version.
+    unset(OV_KLT_CUDART_LIBRARY CACHE)
+    find_library(OV_KLT_CUDART_LIBRARY NAMES cudart PATHS ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES} NO_DEFAULT_PATH REQUIRED)
+    get_filename_component(OV_KLT_CUDART_REAL "${OV_KLT_CUDART_LIBRARY}" REALPATH)
+    get_filename_component(OV_KLT_CUDART_DIR "${OV_KLT_CUDART_REAL}" DIRECTORY)
     add_library(ov_klt_cuda SHARED src/track/cuda/CudaKLT.cu)
     set_target_properties(ov_klt_cuda PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON
-        INSTALL_RPATH "${CUDAToolkit_LIBRARY_DIR}")
-    target_link_libraries(ov_klt_cuda PRIVATE CUDA::cudart)
+        CUDA_RUNTIME_LIBRARY Shared INSTALL_RPATH "${OV_KLT_CUDART_DIR}")
+    target_link_libraries(ov_klt_cuda PRIVATE "${OV_KLT_CUDART_LIBRARY}")
     target_link_libraries(ov_core_lib PRIVATE ov_klt_cuda)
     set_property(TARGET ov_core_lib APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
     install(TARGETS ov_klt_cuda EXPORT export_ov_core LIBRARY DESTINATION lib)
