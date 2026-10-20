@@ -76,6 +76,7 @@ protected:
 
   /// Chi squared 95th percentile table (lookup would be size of residual)
   std::map<int, double> chi_squared_table;
+  size_t diagnostic_updates = 0;
 };
 
 } // namespace ov_msckf

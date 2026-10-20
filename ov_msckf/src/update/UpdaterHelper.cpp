@@ -30,7 +30,8 @@ using namespace ov_type;
 using namespace ov_msckf;
 
 void UpdaterHelper::get_feature_jacobian_representation(std::shared_ptr<State> state, UpdaterHelperFeature &feature, Eigen::MatrixXd &H_f,
-                                                        std::vector<Eigen::MatrixXd> &H_x, std::vector<std::shared_ptr<Type>> &x_order) {
+                                                        std::vector<Eigen::MatrixXd> &H_x, std::vector<std::shared_ptr<Type>> &x_order, std::optional<bool> use_fej) {
+  const bool fej = use_fej.value_or(state->_options.do_fej);
 
   // Global XYZ representation
   if (feature.feat_representation == LandmarkRepresentation::Representation::GLOBAL_3D) {
@@ -43,7 +44,7 @@ void UpdaterHelper::get_feature_jacobian_representation(std::shared_ptr<State> s
   if (feature.feat_representation == LandmarkRepresentation::Representation::GLOBAL_FULL_INVERSE_DEPTH) {
 
     // Get the feature linearization point
-    Eigen::Matrix<double, 3, 1> p_FinG = (state->_options.do_fej) ? feature.p_FinG_fej : feature.p_FinG;
+    Eigen::Matrix<double, 3, 1> p_FinG = (fej) ? feature.p_FinG_fej : feature.p_FinG;
 
     // Get inverse depth representation (should match what is in Landmark.cpp)
     double g_rho = 1 / p_FinG.norm();
@@ -86,7 +87,7 @@ void UpdaterHelper::get_feature_jacobian_representation(std::shared_ptr<State> s
 
   // If I am doing FEJ, I should FEJ the anchor states (should we fej calibration???)
   // Also get the FEJ position of the feature if we are
-  if (state->_options.do_fej) {
+  if (fej) {
     // "Best" feature in the global frame
     Eigen::Vector3d p_FinG_best = R_GtoI.transpose() * R_ItoC.transpose() * (feature.p_FinA - p_IinC) + p_IinG;
     // Transform the best into our anchor frame using FEJ
@@ -190,7 +191,8 @@ void UpdaterHelper::get_feature_jacobian_representation(std::shared_ptr<State> s
 }
 
 void UpdaterHelper::get_feature_jacobian_full(std::shared_ptr<State> state, UpdaterHelperFeature &feature, Eigen::MatrixXd &H_f,
-                                              Eigen::MatrixXd &H_x, Eigen::VectorXd &res, std::vector<std::shared_ptr<Type>> &x_order) {
+                                              Eigen::MatrixXd &H_x, Eigen::VectorXd &res, std::vector<std::shared_ptr<Type>> &x_order, std::optional<bool> use_fej) {
+  const bool fej = use_fej.value_or(state->_options.do_fej);
 
   // Total number of measurements for this feature
   int total_meas = 0;
@@ -301,7 +303,7 @@ void UpdaterHelper::get_feature_jacobian_full(std::shared_ptr<State> state, Upda
   Eigen::MatrixXd dpfg_dlambda;
   std::vector<Eigen::MatrixXd> dpfg_dx;
   std::vector<std::shared_ptr<Type>> dpfg_dx_order;
-  UpdaterHelper::get_feature_jacobian_representation(state, feature, dpfg_dlambda, dpfg_dx, dpfg_dx_order);
+  UpdaterHelper::get_feature_jacobian_representation(state, feature, dpfg_dlambda, dpfg_dx, dpfg_dx_order, fej);
 
   // Assert that all the ones in our order are already in our local jacobian mapping
 #ifndef NDEBUG
@@ -351,7 +353,7 @@ void UpdaterHelper::get_feature_jacobian_full(std::shared_ptr<State> state, Upda
       //=========================================================================
 
       // If we are doing first estimate Jacobians, then overwrite with the first estimates
-      if (state->_options.do_fej) {
+      if (fej) {
         R_GtoIi = clone_Ii->Rot_fej();
         p_IiinG = clone_Ii->pos_fej();
         // R_ItoC = calibration->Rot_fej();
@@ -459,29 +461,20 @@ void UpdaterHelper::measurement_compress_inplace(Eigen::MatrixXd &H_x, Eigen::Ve
   if (H_x.rows() <= H_x.cols())
     return;
 
-  // Do measurement compression through givens rotations
-  // Based on "Matrix Computations 4th Edition by Golub and Van Loan"
-  // See page 252, Algorithm 5.2.4 for how these two loops work
-  // They use "matlab" index notation, thus we need to subtract 1 from all index
-  Eigen::JacobiRotation<double> tempHo_GR;
-  for (int n = 0; n < H_x.cols(); n++) {
-    for (int m = (int)H_x.rows() - 1; m > n; m--) {
-      // Givens matrix G
-      tempHo_GR.makeGivens(H_x(m - 1, n), H_x(m, n));
-      // Multiply G to the corresponding lines (m-1,m) in each matrix
-      // Note: we only apply G to the nonzero cols [n:Ho.cols()-n-1], while
-      //       it is equivalent to applying G to the entire cols [0:Ho.cols()-1].
-      (H_x.block(m - 1, n, 2, H_x.cols() - n)).applyOnTheLeft(0, 1, tempHo_GR.adjoint());
-      (res.block(m - 1, 0, 2, 1)).applyOnTheLeft(0, 1, tempHo_GR.adjoint());
-    }
+  // Compress the tall visual system with a blocked Householder QR. Rotating
+  // pairs of rows individually repeatedly traverses strided, column-major
+  // storage and becomes expensive with longer clone windows and more tracks.
+  // Q is orthogonal, so the retained system has the same H^T*H and H^T*res;
+  // isotropic measurement noise remains isotropic without changing its scale.
+  // Factor in place and apply the implicit reflectors to the residual, avoiding
+  // both an explicit Q and a second copy of the tall measurement Jacobian.
+  const Eigen::Index retained_rows = H_x.cols();
+  {
+    Eigen::HouseholderQR<Eigen::Ref<Eigen::MatrixXd>> qr(H_x);
+    res = (qr.householderQ().adjoint() * res).eval();
+    // The lower triangle stores reflectors, not entries of the compressed H.
+    H_x.topLeftCorner(retained_rows, retained_rows).triangularView<Eigen::StrictlyLower>().setZero();
   }
-
-  // If H is a fat matrix, then use the rows
-  // Else it should be same size as our state
-  int r = std::min(H_x.rows(), H_x.cols());
-
-  // Construct the smaller jacobian and residual after measurement compression
-  assert(r <= H_x.rows());
-  H_x.conservativeResize(r, H_x.cols());
-  res.conservativeResize(r, res.cols());
+  H_x.conservativeResize(retained_rows, H_x.cols());
+  res.conservativeResize(retained_rows);
 }

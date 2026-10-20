@@ -48,6 +48,7 @@ using namespace ov_type;
 using namespace ov_msckf;
 
 VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false), thread_init_success(false) {
+  params_.configure_visual_update();
 
   // Nice startup message
   PRINT_DEBUG("=======================================\n");
@@ -136,7 +137,13 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
     trackFEATS = std::shared_ptr<TrackBase>(new TrackKLT(state->_cam_intrinsics_cameras, init_max_features,
                                                          state->_options.max_aruco_features, params.use_stereo, params.histogram_method,
                                                          params.fast_threshold, params.grid_x, params.grid_y, params.min_px_dist,
-                                                         params.klt_pyramid_levels, params.klt_window_size));
+                                                         params.klt_pyramid_levels, params.klt_window_size, params.klt_max_fb_error,
+                                                         params.klt_ransac_valid_only));
+    std::static_pointer_cast<TrackKLT>(trackFEATS)->set_observation_uncertainty(params.msckf_options.use_observation_covariance,
+                                                                            params.camera_extrinsics);
+    if (params.tracking_backend == "kltnet_onnx")
+      std::static_pointer_cast<TrackKLT>(trackFEATS)->set_neural_tracker(params.kltnet_model_path, params.kltnet_target,
+                                                                      params.kltnet_min_confidence);
   } else {
     trackFEATS = std::shared_ptr<TrackBase>(new TrackDescriptor(
         state->_cam_intrinsics_cameras, init_max_features, state->_options.max_aruco_features, params.use_stereo, params.histogram_method,
@@ -294,6 +301,12 @@ void VioManager::track_image_and_update(const ov_core::CameraData &message_const
   }
 
   // Perform our feature tracking!
+  if (params.use_klt && params.msckf_options.use_observation_covariance && state->_options.do_calib_camera_pose) {
+    std::map<size_t, Eigen::VectorXd> extrinsics;
+    for (const auto &camera : state->_calib_IMUtoCAM)
+      extrinsics[camera.first] = camera.second->value();
+    std::static_pointer_cast<TrackKLT>(trackFEATS)->set_observation_uncertainty(true, extrinsics);
+  }
   trackFEATS->feed_new_camera(message);
 
   // If the aruco tracker is available, the also pass to it

@@ -40,10 +40,20 @@ struct UpdaterOptions {
   /// Covariance for our raw pixel measurements
   double sigma_pix_sq = 1;
 
+  bool use_observation_covariance = false;
+  bool calibrate_innovation = false;
+  bool use_fej2 = false;
+  double innovation_max_variance = 4.0;
+  double innovation_quantile = .8;
+  int innovation_min_blocks = 6;
+  double fej2_rank_tolerance = 1e-6;
+
   /// Nice print function of what parameters we have loaded
   void print() {
     PRINT_DEBUG("    - chi2_multipler: %.1f\n", chi2_multipler);
     PRINT_DEBUG("    - sigma_pix: %.2f\n", sigma_pix);
+    PRINT_DEBUG("    - observation covariance: %d, batch calibration: %d, FEJ2: %d\n",
+                use_observation_covariance, calibrate_innovation, use_fej2);
   }
 };
 

@@ -22,6 +22,7 @@
 #include "UpdaterSLAM.h"
 
 #include "UpdaterHelper.h"
+#include "VisualUpdate.h"
 
 #include "feat/Feature.h"
 #include "feat/FeatureInitializer.h"
@@ -155,6 +156,7 @@ void UpdaterSLAM::delayed_init(std::shared_ptr<State> state, std::vector<std::sh
     feat.uvs = (*it2)->uvs;
     feat.uvs_norm = (*it2)->uvs_norm;
     feat.timestamps = (*it2)->timestamps;
+    feat.observation_covariances = (*it2)->observation_covariances;
 
     // If we are using single inverse depth, then it is equivalent to using the msckf inverse depth
     auto feat_rep =
@@ -183,6 +185,14 @@ void UpdaterSLAM::delayed_init(std::shared_ptr<State> state, std::vector<std::sh
 
     // Get the Jacobian for this feature
     UpdaterHelper::get_feature_jacobian_full(state, feat, H_f, H_x, res, Hx_order);
+    const auto &measurement_options = ((int)feat.featid < state->_options.max_aruco_features) ? _options_aruco : _options_slam;
+    if (measurement_options.use_observation_covariance &&
+        !VisualUpdate::whiten(feat.observation_covariances, feat.timestamps, H_f, H_x, res)) {
+      (*it2)->to_delete = true;
+      it2 = feature_vec.erase(it2);
+      continue;
+    }
+
 
     // If we are doing the single feature representation, then we need to remove the bearing portion
     // To do so, we project the bearing portion onto the state and depth Jacobians and the residual.
@@ -316,6 +326,12 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
   std::vector<std::shared_ptr<Type>> Hx_order_big;
   size_t ct_jacob = 0;
   size_t ct_meas = 0;
+  Eigen::MatrixXd delta_big;
+  if (_options_slam.use_fej2)
+    delta_big = Eigen::MatrixXd::Zero(max_meas_size, max_hx_size);
+  std::vector<VisualUpdate::Innovation> innovations;
+  std::vector<std::pair<size_t, size_t>> adaptive_ranges;
+
 
   // 4. Compute linear system for each feature, nullspace project, and reject
   auto it2 = feature_vec.begin();
@@ -334,6 +350,7 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
     feat.uvs = (*it2)->uvs;
     feat.uvs_norm = (*it2)->uvs_norm;
     feat.timestamps = (*it2)->timestamps;
+    feat.observation_covariances = (*it2)->observation_covariances;
 
     // If we are using single inverse depth, then it is equivalent to using the msckf inverse depth
     feat.feat_representation = landmark->_feat_representation;
@@ -360,6 +377,37 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
 
     // Get the Jacobian for this feature
     UpdaterHelper::get_feature_jacobian_full(state, feat, H_f, H_x, res, Hx_order);
+    const auto &measurement_options = ((int)feat.featid < state->_options.max_aruco_features) ? _options_aruco : _options_slam;
+    Eigen::MatrixXd delta_pose;
+    if (_options_slam.use_fej2) {
+      delta_pose = Eigen::MatrixXd::Zero(H_x.rows(), H_x.cols());
+      if (measurement_options.use_fej2) {
+        Eigen::MatrixXd current_f, current_x;
+        Eigen::VectorXd current_res;
+        std::vector<std::shared_ptr<Type>> current_order;
+        UpdaterHelper::get_feature_jacobian_full(state, feat, current_f, current_x, current_res, current_order, false);
+        if (current_order != Hx_order)
+          throw std::logic_error("FEJ2 Jacobian variable order changed");
+        size_t column = 0;
+        for (const auto &variable : Hx_order) {
+          // FEJ2's practical MSCKF-VIO design projects Delta H_I, not the sparse landmark error Jacobian.
+          const auto latest = state->_clones_IMU.find(state->_timestamp);
+          const bool clone = latest != state->_clones_IMU.end() && latest->second == variable;
+          if (clone)
+            delta_pose.middleCols(column, variable->size()) =
+                current_x.middleCols(column, variable->size()) - H_x.middleCols(column, variable->size());
+          column += variable->size();
+        }
+      }
+    }
+    if (measurement_options.use_observation_covariance &&
+        !VisualUpdate::whiten(feat.observation_covariances, feat.timestamps, H_f, H_x, res,
+                             _options_slam.use_fej2 ? &delta_pose : nullptr)) {
+      (*it2)->to_delete = true;
+      it2 = feature_vec.erase(it2);
+      continue;
+    }
+
 
     // Place Jacobians in one big Jacobian, since the landmark is already in our state vector
     Eigen::MatrixXd H_xf = H_x;
@@ -373,7 +421,16 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
       // Nullspace project the bearing portion
       // This takes into account that we have marginalized the bearing already
       // Thus this is crucial to ensuring estimator consistency as we are not taking the bearing to be true
-      UpdaterHelper::nullspace_project_inplace(H_f, H_xf, res);
+      if (_options_slam.use_fej2) {
+        const Eigen::Index state_columns = H_xf.cols();
+        H_xf.conservativeResize(H_xf.rows(), state_columns + delta_pose.cols());
+        H_xf.rightCols(delta_pose.cols()) = delta_pose;
+        UpdaterHelper::nullspace_project_inplace(H_f, H_xf, res);
+        delta_pose = H_xf.rightCols(delta_pose.cols()).eval();
+        H_xf.conservativeResize(H_xf.rows(), state_columns);
+      } else {
+        UpdaterHelper::nullspace_project_inplace(H_f, H_xf, res);
+      }
 
     } else {
 
@@ -389,6 +446,12 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
     // Chi2 distance check
     Eigen::MatrixXd P_marg = StateHelper::get_marginal_covariance(state, Hxf_order);
     Eigen::MatrixXd S = H_xf * P_marg * H_xf.transpose();
+    if (measurement_options.calibrate_innovation) {
+      VisualUpdate::Innovation block;
+      if (VisualUpdate::innovation(S, res, measurement_options.sigma_pix_sq, block))
+        innovations.push_back(std::move(block));
+    }
+
     double sigma_pix_sq =
         ((int)feat.featid < state->_options.max_aruco_features) ? _options_aruco.sigma_pix_sq : _options_slam.sigma_pix_sq;
     S.diagonal() += sigma_pix_sq * Eigen::VectorXd::Ones(S.rows());
@@ -437,11 +500,16 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
 
       // Append to our large Jacobian
       Hx_big.block(ct_meas, Hx_mapping[var], H_xf.rows(), var->size()) = H_xf.block(0, ct_hx, H_xf.rows(), var->size());
+      if (_options_slam.use_fej2 && var != landmark)
+        delta_big.block(ct_meas, Hx_mapping[var], delta_pose.rows(), var->size()) =
+            delta_pose.middleCols(ct_hx, var->size());
       ct_hx += var->size();
     }
 
     // Our isotropic measurement noise
     R_big.block(ct_meas, ct_meas, res.rows(), res.rows()) *= sigma_pix_sq;
+    if (measurement_options.calibrate_innovation)
+      adaptive_ranges.emplace_back(ct_meas, res.rows());
 
     // Append our residual and move forward
     res_big.block(ct_meas, 0, res.rows(), 1) = res;
@@ -465,6 +533,22 @@ void UpdaterSLAM::update(std::shared_ptr<State> state, std::vector<std::shared_p
   res_big.conservativeResize(ct_meas, 1);
   Hx_big.conservativeResize(ct_meas, ct_jacob);
   R_big.conservativeResize(ct_meas, ct_meas);
+
+  const double inflation = _options_slam.calibrate_innovation
+      ? VisualUpdate::minimum_inflation(innovations, _options_slam.innovation_max_variance, _options_slam.innovation_quantile,
+                                      _options_slam.innovation_min_blocks) : 1.0;
+  for (const auto &range : adaptive_ranges)
+    R_big.block(range.first, range.first, range.second, range.second) *= inflation;
+  int removed = 0;
+  if (_options_slam.use_fej2) {
+    delta_big.conservativeResize(ct_meas, ct_jacob);
+    removed = VisualUpdate::fej2_project(Hx_big, res_big, R_big, delta_big, _options_slam.fej2_rank_tolerance);
+  }
+  if ((_options_slam.use_fej2 || _options_slam.calibrate_innovation) && ++diagnostic_updates % 100 == 1)
+    PRINT_INFO("[VISUAL-SLAM] pre-gate blocks=%zu variance_scale=%.3f FEJ2_removed=%d retained=%d\n",
+               innovations.size(), inflation, removed, (int)res_big.size());
+  if (res_big.size() == 0)
+    return;
 
   // 5. With all good SLAM features update the state
   StateHelper::EKFUpdate(state, Hx_order_big, Hx_big, res_big, R_big);

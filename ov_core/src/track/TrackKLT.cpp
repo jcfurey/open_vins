@@ -30,8 +30,52 @@
 #include "feat/FeatureDatabase.h"
 #include "utils/opencv_lambda_body.h"
 #include "utils/print.h"
+#include "utils/quat_ops.h"
 
 using namespace ov_core;
+
+void TrackKLT::set_neural_tracker(const std::string &model_path, const std::string &target, double min_confidence) {
+  if (!std::isfinite(min_confidence) || min_confidence < 0)
+    throw std::invalid_argument("kltnet_min_confidence must be finite and nonnegative");
+  neural_flow = std::make_shared<NeuralFlow>(model_path, target);
+  neural_min_confidence = min_confidence;
+}
+
+void TrackKLT::set_observation_uncertainty(bool enabled, const std::map<size_t, Eigen::VectorXd> &extrinsics) {
+  observation_uncertainty = enabled;
+  if (!enabled)
+    return;
+  for (const auto &camera : camera_calib) {
+    const auto &pose = extrinsics.at(camera.first);
+    if (pose.size() != 7 || !pose.allFinite())
+      throw std::invalid_argument("Observation quality requires valid camera extrinsics");
+    Eigen::Matrix4d transform = Eigen::Matrix4d::Identity();
+    transform.topLeftCorner<3, 3>() = quat_2_Rot(pose.head<4>());
+    transform.topRightCorner<3, 1>() = pose.tail<3>();
+    quality_extrinsics[camera.first] = transform;
+    quality_ages[camera.first];
+  }
+}
+
+std::vector<Eigen::Matrix2d> TrackKLT::observation_covariance(size_t camera, const cv::Mat &previous, const cv::Mat &current,
+                                                           const std::vector<cv::Point2f> &old_points,
+                                                           const std::vector<cv::KeyPoint> &points, const std::vector<size_t> &ids,
+                                                           const std::vector<FlowQuality> &diagnostics) {
+  std::vector<cv::Point2f> new_points;
+  std::vector<size_t> ages;
+  std::unordered_map<size_t, size_t> next_ages;
+  const auto &previous_ages = quality_ages.at(camera);
+  for (size_t i = 0; i < ids.size(); ++i) {
+    auto old = previous_ages.find(ids[i]);
+    const size_t age = old == previous_ages.end() ? 1 : old->second + 1;
+    ages.push_back(age);
+    next_ages.emplace(ids[i], age);
+    new_points.push_back(points[i].pt);
+  }
+  auto result = TrackQuality::covariance(previous, current, old_points, new_points, diagnostics, ages);
+  quality_ages.at(camera).swap(next_ages);
+  return result;
+}
 
 void TrackKLT::feed_new_camera(const CameraData &message) {
 
@@ -127,9 +171,11 @@ TrackKLT::MonocularTrack TrackKLT::track_monocular(const CameraData &message, si
   // Our return success masks, and predicted new features
   std::vector<uchar> mask_ll;
   std::vector<cv::KeyPoint> pts_left_new = pts_left_old;
+  std::vector<FlowQuality> diagnostics;
 
   // Lets track temporally
-  perform_matching(img_pyramid_last.at(cam_id), track.imgpyr, pts_left_old, pts_left_new, cam_id, cam_id, mask_ll);
+  perform_matching(img_pyramid_last.at(cam_id), track.imgpyr, pts_left_old, pts_left_new, cam_id, cam_id, mask_ll,
+                   observation_uncertainty ? &diagnostics : nullptr, &ids_left_old);
   assert(pts_left_new.size() == ids_left_old.size());
   const auto time_klt = boost::posix_time::microsec_clock::local_time();
 
@@ -153,6 +199,10 @@ TrackKLT::MonocularTrack TrackKLT::track_monocular(const CameraData &message, si
     if (mask_ll[i]) {
       track.pts.push_back(pts_left_new[i]);
       track.ids.push_back(ids_left_old[i]);
+      if (observation_uncertainty) {
+        track.source_points.push_back(pts_left_old[i].pt);
+        track.quality.push_back(diagnostics[i]);
+      }
     }
   }
   track.update_database = true;
@@ -169,14 +219,24 @@ void TrackKLT::commit_monocular(const CameraData &message, MonocularTrack &track
   // Lock this data feed for this camera
   const size_t cam_id = track.cam_id;
   std::lock_guard<std::mutex> lck(mtx_feeds.at(cam_id));
+  const auto previous_ids = neural_flow ? track.ids : std::vector<size_t>();
   resolve_pending_ids(track.ids, track.detected);
+  if (neural_flow) {
+    for (size_t i = 0; i < track.ids.size(); ++i)
+      neural_flow->rekey(cam_id, previous_ids[i], track.ids[i]);
+    neural_flow->retain(cam_id, track.ids);
+  }
 
   // Update our feature database, with theses new observations
   if (track.update_database) {
     const std::vector<cv::Point2f> pts_n = undistort_keypoints(cam_id, track.pts);
+    std::vector<Eigen::Matrix2d> covariances;
+    if (observation_uncertainty)
+      covariances = observation_covariance(cam_id, img_pyramid_last.at(cam_id)[0], track.img, track.source_points,
+                                           track.pts, track.ids, track.quality);
     for (size_t i = 0; i < track.pts.size(); i++) {
       database->update_feature(track.ids.at(i), message.timestamp, cam_id, track.pts.at(i).pt.x, track.pts.at(i).pt.y, pts_n.at(i).x,
-                               pts_n.at(i).y);
+                               pts_n.at(i).y, observation_uncertainty ? &covariances[i] : nullptr);
     }
   }
 
@@ -243,6 +303,7 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
 
   // Our return success masks, and predicted new features
   std::vector<uchar> mask_ll, mask_rr;
+  std::vector<FlowQuality> quality_left, quality_right;
   std::vector<cv::KeyPoint> pts_left_new = pts_left_old;
   std::vector<cv::KeyPoint> pts_right_new = pts_right_old;
 
@@ -253,7 +314,9 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
                     perform_matching(img_pyramid_last[is_left ? cam_id_left : cam_id_right], is_left ? imgpyr_left : imgpyr_right,
                                      is_left ? pts_left_old : pts_right_old, is_left ? pts_left_new : pts_right_new,
                                      is_left ? cam_id_left : cam_id_right, is_left ? cam_id_left : cam_id_right,
-                                     is_left ? mask_ll : mask_rr);
+                                     is_left ? mask_ll : mask_rr,
+                                     observation_uncertainty ? (is_left ? &quality_left : &quality_right) : nullptr,
+                                     is_left ? &ids_left_old : &ids_right_old);
                   }
                 }));
   rT4 = boost::posix_time::microsec_clock::local_time();
@@ -284,6 +347,10 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
     pts_last[cam_id_right].clear();
     ids_last[cam_id_left].clear();
     ids_last[cam_id_right].clear();
+    if (neural_flow) {
+      neural_flow->retain(cam_id_left, {});
+      neural_flow->retain(cam_id_right, {});
+    }
     PRINT_ERROR(RED "[KLT-EXTRACTOR]: Failed to get enough points to do RANSAC, resetting.....\n" RESET);
     return;
   }
@@ -347,16 +414,69 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
     }
   }
 
+  std::vector<Eigen::Matrix2d> covariance_left, covariance_right;
+  if (observation_uncertainty) {
+    std::unordered_map<size_t, size_t> left_indices, good_right_indices;
+    for (size_t i = 0; i < ids_left_old.size(); ++i)
+      left_indices.emplace(ids_left_old[i], i);
+    std::vector<cv::Point2f> source_left, source_right;
+    std::vector<FlowQuality> diagnostics_left, diagnostics_right;
+    for (size_t i = 0; i < good_ids_left.size(); ++i) {
+      const size_t index = left_indices.at(good_ids_left[i]);
+      source_left.push_back(pts_left_old[index].pt);
+      diagnostics_left.push_back(quality_left[index]);
+    }
+    for (size_t i = 0; i < good_ids_right.size(); ++i) {
+      const size_t index = right_indices.at(good_ids_right[i]);
+      source_right.push_back(pts_right_old[index].pt);
+      diagnostics_right.push_back(quality_right[index]);
+      good_right_indices.emplace(good_ids_right[i], i);
+    }
+    const Eigen::Matrix4d relative = quality_extrinsics.at(cam_id_right) * quality_extrinsics.at(cam_id_left).inverse();
+    const Eigen::Matrix3d rotation = relative.topLeftCorner<3, 3>();
+    const Eigen::Matrix3d essential = skew_x(relative.topRightCorner<3, 1>()) * rotation;
+    const double focal = std::max(camera_calib.at(cam_id_left)->get_K()(0, 0), camera_calib.at(cam_id_right)->get_K()(0, 0));
+    auto bearing = [&](size_t camera, const cv::Point2f &point) {
+      const auto p = camera_calib.at(camera)->undistort_cv(point);
+      return Eigen::Vector3d(p.x, p.y, 1.0);
+    };
+    for (size_t left = 0; left < good_ids_left.size(); ++left) {
+      auto found = good_right_indices.find(good_ids_left[left]);
+      if (found == good_right_indices.end())
+        continue;
+      const size_t right = found->second;
+      const auto l = bearing(cam_id_left, good_left[left].pt), r = bearing(cam_id_right, good_right[right].pt);
+      const auto old_l = bearing(cam_id_left, source_left[left]), old_r = bearing(cam_id_right, source_right[right]);
+      const double epipolar = TrackQuality::epipolar_error(essential, l, r, focal);
+      const double imbalance = std::abs(diagnostics_left[left].temporal - diagnostics_right[right].temporal);
+      const Eigen::Vector3d rotated_l = rotation * l, rotated_old_l = rotation * old_l;
+      const double disparity = focal * std::abs((r.head<2>() - rotated_l.head<2>() / rotated_l.z()).norm() -
+                                                (old_r.head<2>() - rotated_old_l.head<2>() / rotated_old_l.z()).norm());
+      diagnostics_left[left].balance = diagnostics_right[right].balance = imbalance;
+      diagnostics_left[left].stereo = diagnostics_right[right].stereo = epipolar;
+      diagnostics_left[left].disparity = diagnostics_right[right].disparity = disparity;
+    }
+    covariance_left = observation_covariance(cam_id_left, img_pyramid_last.at(cam_id_left)[0], img_left,
+                                             source_left, good_left, good_ids_left, diagnostics_left);
+    covariance_right = observation_covariance(cam_id_right, img_pyramid_last.at(cam_id_right)[0], img_right,
+                                              source_right, good_right, good_ids_right, diagnostics_right);
+  }
+
+  if (neural_flow) {
+    neural_flow->retain(cam_id_left, good_ids_left);
+    neural_flow->retain(cam_id_right, good_ids_right);
+  }
+
   // Update our feature database, with theses new observations
   const std::vector<cv::Point2f> good_left_n = undistort_keypoints(cam_id_left, good_left);
   for (size_t i = 0; i < good_left.size(); i++) {
     database->update_feature(good_ids_left.at(i), message.timestamp, cam_id_left, good_left.at(i).pt.x, good_left.at(i).pt.y,
-                             good_left_n.at(i).x, good_left_n.at(i).y);
+                             good_left_n.at(i).x, good_left_n.at(i).y, observation_uncertainty ? &covariance_left[i] : nullptr);
   }
   const std::vector<cv::Point2f> good_right_n = undistort_keypoints(cam_id_right, good_right);
   for (size_t i = 0; i < good_right.size(); i++) {
     database->update_feature(good_ids_right.at(i), message.timestamp, cam_id_right, good_right.at(i).pt.x, good_right.at(i).pt.y,
-                             good_right_n.at(i).x, good_right_n.at(i).y);
+                             good_right_n.at(i).x, good_right_n.at(i).y, observation_uncertainty ? &covariance_right[i] : nullptr);
   }
 
   // Move forward in time
@@ -817,10 +937,14 @@ void TrackKLT::perform_detection_stereo(const std::vector<cv::Mat> &img0pyr, con
 }
 
 void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::vector<cv::Mat> &img1pyr, std::vector<cv::KeyPoint> &kpts0,
-                                std::vector<cv::KeyPoint> &kpts1, size_t id0, size_t id1, std::vector<uchar> &mask_out) {
+                                std::vector<cv::KeyPoint> &kpts1, size_t id0, size_t id1, std::vector<uchar> &mask_out,
+                                std::vector<FlowQuality> *diagnostics, const std::vector<size_t> *feature_ids) {
 
   // We must have equal vectors
   assert(kpts0.size() == kpts1.size());
+  mask_out.assign(kpts0.size(), 0);
+  if (diagnostics)
+    diagnostics->assign(kpts0.size(), FlowQuality());
 
   // Return if we don't have any points
   if (kpts0.empty() || kpts1.empty())
@@ -836,8 +960,6 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::
   // If we don't have enough points for ransac just return empty
   // We set the mask to be all zeros since all points failed RANSAC
   if (pts0.size() < 10) {
-    for (size_t i = 0; i < pts0.size(); i++)
-      mask_out.push_back((uchar)0);
     return;
   }
 
@@ -845,29 +967,140 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::
   std::vector<uchar> mask_klt;
   std::vector<float> error;
   cv::TermCriteria term_crit = cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 30, 0.01);
-  cv::calcOpticalFlowPyrLK(img0pyr, img1pyr, pts0, pts1, mask_klt, error, win_size, pyr_levels, term_crit, cv::OPTFLOW_USE_INITIAL_FLOW);
-
-  // Normalize these points, so we can then do ransac
-  // We don't want to do ransac on distorted image uvs since the mapping is nonlinear
-  std::vector<cv::Point2f> pts0_n = camera_calib.at(id0)->undistort_cv(pts0);
-  std::vector<cv::Point2f> pts1_n = camera_calib.at(id1)->undistort_cv(pts1);
-
-  // Do RANSAC outlier rejection (note since we normalized the max pixel error is now in the normalized cords)
-  std::vector<uchar> mask_rsc;
-  double max_focallength_img0 = std::max(camera_calib.at(id0)->get_K()(0, 0), camera_calib.at(id0)->get_K()(1, 1));
-  double max_focallength_img1 = std::max(camera_calib.at(id1)->get_K()(0, 0), camera_calib.at(id1)->get_K()(1, 1));
-  double max_focallength = std::max(max_focallength_img0, max_focallength_img1);
-  cv::findFundamentalMat(pts0_n, pts1_n, cv::FM_RANSAC, 2.0 / max_focallength, 0.999, mask_rsc);
-
-  // Loop through and record only ones that are valid
-  for (size_t i = 0; i < mask_klt.size(); i++) {
-    auto mask = (uchar)((i < mask_klt.size() && mask_klt[i] && i < mask_rsc.size() && mask_rsc[i]) ? 1 : 0);
-    mask_out.push_back(mask);
+  const bool learned = neural_flow && id0 == id1;
+  if (learned) {
+    if (!feature_ids || feature_ids->size() != pts0.size())
+      throw std::invalid_argument("Learned temporal tracking requires stable feature IDs");
+    const auto prediction = neural_flow->predict(id0, img0pyr[0], img1pyr[0], pts0, *feature_ids);
+    pts1 = prediction.points;
+    mask_klt.resize(pts0.size());
+    error.assign(pts0.size(), 0.0f);
+    for (size_t i = 0; i < pts0.size(); ++i) {
+      const auto &point = pts1[i];
+      mask_klt[i] = std::isfinite(prediction.confidence[i]) && prediction.confidence[i] >= neural_min_confidence &&
+                    std::isfinite(point.x) && std::isfinite(point.y) && point.x >= 0 && point.y >= 0 &&
+                    point.x < img1pyr[0].cols && point.y < img1pyr[0].rows;
+      if (!mask_klt[i]) {
+        pts1[i] = pts0[i]; // Keep rejected coordinates finite for downstream image-mask indexing.
+      } else if (diagnostics) {
+        cv::Mat before, after;
+        cv::getRectSubPix(img0pyr[0], win_size, pts0[i], before, CV_32F);
+        cv::getRectSubPix(img1pyr[0], win_size, pts1[i], after, CV_32F);
+        error[i] = static_cast<float>(cv::norm(before, after, cv::NORM_L1) / before.total());
+      }
+    }
+  } else {
+    cv::calcOpticalFlowPyrLK(img0pyr, img1pyr, pts0, pts1, mask_klt, error, win_size, pyr_levels, term_crit, cv::OPTFLOW_USE_INITIAL_FLOW);
   }
+
+  if (diagnostics) {
+    std::vector<std::pair<float, size_t>> candidates;
+    for (size_t i = 0; i < pts0.size(); ++i) {
+      (*diagnostics)[i].temporal = error[i];
+      if (mask_klt[i] && std::isfinite(error[i]) && std::isfinite(pts1[i].x) && std::isfinite(pts1[i].y) &&
+          pts1[i].x >= 0 && pts1[i].y >= 0 && pts1[i].x < img1pyr[0].cols && pts1[i].y < img1pyr[0].rows)
+        candidates.emplace_back(error[i], i);
+    }
+    // Bounded selective round-trip diagnostics; unchecked tracks keep NaN (neutral), not a fictitious zero error.
+    std::sort(candidates.begin(), candidates.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+    const size_t budget = std::min(candidates.size(), std::min<size_t>(8, std::max<size_t>(3, candidates.size() / 10)));
+    if (budget > 0) {
+      std::vector<cv::Point2f> forward, backward;
+      for (size_t i = 0; i < budget; ++i) {
+        forward.push_back(pts1[candidates[i].second]);
+        backward.push_back(pts0[candidates[i].second]);
+      }
+      std::vector<uchar> reverse_status;
+      std::vector<float> reverse_error;
+      cv::calcOpticalFlowPyrLK(img1pyr, img0pyr, forward, backward, reverse_status, reverse_error, win_size, pyr_levels,
+                               term_crit, cv::OPTFLOW_USE_INITIAL_FLOW);
+      for (size_t i = 0; i < budget; ++i) {
+        const double distance = cv::norm(backward[i] - pts0[candidates[i].second]);
+        (*diagnostics)[candidates[i].second].backward = reverse_status[i] && std::isfinite(distance) ? distance : 20.0;
+      }
+    }
+  }
+
+  // A one-way LK success is insufficient for occlusions and repeated texture. When enabled,
+  // require the target patch to track back to the original point before fitting the geometric model.
+  if (max_fb_error > 0.0) {
+    std::vector<cv::Point2f> forward, backward;
+    std::vector<size_t> indices;
+    for (size_t i = 0; i < pts0.size(); ++i) {
+      const auto &p = pts1[i];
+      if (!mask_klt[i] || !std::isfinite(p.x) || !std::isfinite(p.y) || p.x < 0 || p.y < 0 || p.x >= img1pyr[0].cols ||
+          p.y >= img1pyr[0].rows) {
+        mask_klt[i] = 0;
+        continue;
+      }
+      forward.push_back(p);
+      backward.push_back(pts0[i]);
+      indices.push_back(i);
+    }
+    if (!forward.empty()) {
+      std::vector<uchar> reverse_status;
+      cv::calcOpticalFlowPyrLK(img1pyr, img0pyr, forward, backward, reverse_status, error, win_size, pyr_levels, term_crit,
+                               cv::OPTFLOW_USE_INITIAL_FLOW);
+      const double threshold_squared = max_fb_error * max_fb_error;
+      for (size_t i = 0; i < indices.size(); ++i) {
+        const auto delta = backward[i] - pts0[indices[i]];
+        mask_klt[indices[i]] =
+            reverse_status[i] && std::isfinite(delta.x) && std::isfinite(delta.y) && delta.dot(delta) <= threshold_squared;
+      }
+    }
+  }
+
+  mask_out = geometric_inlier_mask(pts0, pts1, mask_klt, id0, id1, learned || ransac_valid_only || max_fb_error > 0.0);
 
   // Copy back the updated positions
   for (size_t i = 0; i < pts0.size(); i++) {
     kpts0.at(i).pt = pts0.at(i);
     kpts1.at(i).pt = pts1.at(i);
   }
+}
+
+std::vector<uchar> TrackKLT::geometric_inlier_mask(const std::vector<cv::Point2f> &pts0, const std::vector<cv::Point2f> &pts1,
+                                                   const std::vector<uchar> &flow_status, size_t id0, size_t id1, bool valid_only) {
+  assert(pts0.size() == pts1.size() && pts0.size() == flow_status.size());
+  std::vector<uchar> result(pts0.size(), 0);
+  std::vector<cv::Point2f> valid0, valid1;
+  std::vector<size_t> indices;
+  const auto camera0 = camera_calib.at(id0), camera1 = camera_calib.at(id1);
+  const auto inside = [](const cv::Point2f &p, const std::shared_ptr<CamBase> &camera) {
+    return std::isfinite(p.x) && std::isfinite(p.y) && p.x >= 0 && p.y >= 0 && p.x < camera->w() && p.y < camera->h();
+  };
+  for (size_t i = 0; i < pts0.size(); ++i) {
+    if (valid_only && (!flow_status[i] || !inside(pts0[i], camera0) || !inside(pts1[i], camera1)))
+      continue;
+    valid0.push_back(pts0[i]);
+    valid1.push_back(pts1[i]);
+    indices.push_back(i);
+  }
+  if (indices.size() < 10)
+    return result;
+
+  // In valid-only mode, failed LK predictions do not influence RANSAC's model/inlier ratio.
+  // The default mode preserves the original finite-input tracking behavior for accuracy ablations.
+  auto normalized0 = camera0->undistort_cv(valid0);
+  auto normalized1 = camera1->undistort_cv(valid1);
+  valid0.clear();
+  valid1.clear();
+  std::vector<size_t> finite_indices;
+  for (size_t i = 0; i < indices.size(); ++i) {
+    if (!std::isfinite(normalized0[i].x) || !std::isfinite(normalized0[i].y) || !std::isfinite(normalized1[i].x) ||
+        !std::isfinite(normalized1[i].y))
+      continue;
+    valid0.push_back(normalized0[i]);
+    valid1.push_back(normalized1[i]);
+    finite_indices.push_back(indices[i]);
+  }
+  if (finite_indices.size() < 10)
+    return result;
+
+  const double max_focal = std::max({camera0->get_K()(0, 0), camera0->get_K()(1, 1), camera1->get_K()(0, 0), camera1->get_K()(1, 1)});
+  std::vector<uchar> geometric_status;
+  cv::findFundamentalMat(valid0, valid1, cv::FM_RANSAC, 2.0 / max_focal, 0.999, geometric_status);
+  for (size_t i = 0; i < geometric_status.size(); ++i)
+    result[finite_indices[i]] = flow_status[finite_indices[i]] && geometric_status[i];
+  return result;
 }

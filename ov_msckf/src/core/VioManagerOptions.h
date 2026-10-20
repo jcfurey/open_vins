@@ -28,6 +28,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <stdexcept>
 
 #include "state/StateOptions.h"
 #include "update/UpdaterOptions.h"
@@ -147,6 +148,32 @@ struct VioManagerOptions {
   /// Update options for zero velocity (chi2 multiplier)
   UpdaterOptions zupt_options;
 
+  /// Optional visual measurement update implementations.
+  std::string visual_update_backend = "standard";
+
+  void configure_visual_update() {
+    const bool rdic = visual_update_backend == "rdic" || visual_update_backend == "rdic_fej2";
+    const bool fej2 = visual_update_backend == "fej2" || visual_update_backend == "rdic_fej2";
+    if (visual_update_backend != "standard" && !rdic && !fej2)
+      throw std::invalid_argument("visual_update_backend must be standard, rdic, fej2 or rdic_fej2");
+    if (fej2 && !state_options.do_fej)
+      throw std::invalid_argument("FEJ2 requires use_fej=true");
+    if (rdic && !use_klt)
+      throw std::invalid_argument("RDIC observation quality requires the KLT tracking frontend");
+    if (!std::isfinite(msckf_options.innovation_max_variance) || msckf_options.innovation_max_variance < 1 ||
+        !(msckf_options.innovation_quantile > 0 && msckf_options.innovation_quantile < 1) ||
+        msckf_options.innovation_min_blocks < 1 ||
+        !(slam_options.fej2_rank_tolerance > 0 && slam_options.fej2_rank_tolerance < 1))
+      throw std::invalid_argument("Invalid visual update backend settings");
+    msckf_options.use_observation_covariance = slam_options.use_observation_covariance = rdic;
+    msckf_options.calibrate_innovation = slam_options.calibrate_innovation = rdic;
+    slam_options.innovation_max_variance = msckf_options.innovation_max_variance;
+    slam_options.innovation_quantile = msckf_options.innovation_quantile;
+    slam_options.innovation_min_blocks = msckf_options.innovation_min_blocks;
+    msckf_options.use_fej2 = false;
+    slam_options.use_fej2 = fej2;
+  }
+
   /**
    * @brief This function will load print out all noise parameters loaded.
    * This allows for visual checking that everything was loaded properly from ROS/CMD parsers.
@@ -173,7 +200,14 @@ struct VioManagerOptions {
       slam_options.sigma_pix_sq = std::pow(slam_options.sigma_pix, 2);
       aruco_options.sigma_pix_sq = std::pow(aruco_options.sigma_pix, 2);
       parser->parse_config("zupt_chi2_multipler", zupt_options.chi2_multipler);
+      parser->parse_config("visual_update_backend", visual_update_backend, false);
+      parser->parse_config("rdic_max_variance", msckf_options.innovation_max_variance, false);
+      parser->parse_config("rdic_quantile", msckf_options.innovation_quantile, false);
+      parser->parse_config("rdic_min_blocks", msckf_options.innovation_min_blocks, false);
+      parser->parse_config("fej2_rank_tolerance", slam_options.fej2_rank_tolerance, false);
     }
+    configure_visual_update();
+    PRINT_INFO("Visual update backend: %s\n", visual_update_backend.c_str());
     PRINT_DEBUG("  Updater MSCKF Feats:\n");
     msckf_options.print();
     PRINT_DEBUG("  Updater SLAM Feats:\n");
@@ -424,6 +458,25 @@ struct VioManagerOptions {
   /// If we should use KLT tracking, or descriptor matcher
   bool use_klt = true;
 
+  /// Native KLT/descriptor selection remains controlled by use_klt; the learned path needs a complete trained export.
+  std::string tracking_backend = "native";
+  std::string kltnet_model_path;
+  std::string kltnet_target = "cpu";
+  double kltnet_min_confidence = 0.1;
+
+  void configure_tracking() const {
+    if (tracking_backend != "native" && tracking_backend != "kltnet_onnx")
+      throw std::invalid_argument("tracking_backend must be native or kltnet_onnx");
+    if (tracking_backend == "kltnet_onnx") {
+      if (!use_klt || kltnet_model_path.empty())
+        throw std::invalid_argument("kltnet_onnx requires use_klt=true and kltnet_model_path pointing to a trained export");
+      if (kltnet_target != "cpu" && kltnet_target != "cuda")
+        throw std::invalid_argument("kltnet_target must be cpu or cuda");
+      if (!std::isfinite(kltnet_min_confidence) || kltnet_min_confidence < 0)
+        throw std::invalid_argument("kltnet_min_confidence must be finite and nonnegative");
+    }
+  }
+
   /// If should extract aruco tags and estimate them
   bool use_aruco = true;
 
@@ -463,6 +516,12 @@ struct VioManagerOptions {
   /// Odd optical-flow patch width in processed-image pixels.
   int klt_window_size = 15;
 
+  /// Maximum forward/backward optical-flow error in processed-image pixels; zero disables the check.
+  double klt_max_fb_error = 0.0;
+
+  /// Experimental valid-only RANSAC input filtering; reciprocal tracking also implies this check.
+  bool klt_ransac_valid_only = false;
+
   /// What type of pre-processing histogram method should be applied to images
   ov_core::TrackBase::HistogramMethod histogram_method = ov_core::TrackBase::HistogramMethod::HISTOGRAM;
 
@@ -498,6 +557,12 @@ struct VioManagerOptions {
       parser->parse_config("min_px_dist", min_px_dist);
       parser->parse_config("klt_pyramid_levels", klt_pyramid_levels, false);
       parser->parse_config("klt_window_size", klt_window_size, false);
+      parser->parse_config("klt_max_fb_error", klt_max_fb_error, false);
+      parser->parse_config("klt_ransac_valid_only", klt_ransac_valid_only, false);
+      parser->parse_config("tracking_backend", tracking_backend, false);
+      parser->parse_config("kltnet_model_path", kltnet_model_path, false);
+      parser->parse_config("kltnet_target", kltnet_target, false);
+      parser->parse_config("kltnet_min_confidence", kltnet_min_confidence, false);
       std::string histogram_method_str = "HISTOGRAM";
       parser->parse_config("histogram_method", histogram_method_str);
       if (histogram_method_str == "NONE") {
@@ -516,6 +581,8 @@ struct VioManagerOptions {
       parser->parse_config("knn_ratio", knn_ratio);
       parser->parse_config("track_frequency", track_frequency);
     }
+    configure_tracking();
+    PRINT_INFO("Tracking backend: %s\n", tracking_backend.c_str());
     PRINT_DEBUG("FEATURE TRACKING PARAMETERS:\n");
     PRINT_DEBUG("  - use_stereo: %d\n", use_stereo);
     PRINT_DEBUG("  - use_klt: %d\n", use_klt);
@@ -531,6 +598,8 @@ struct VioManagerOptions {
     PRINT_DEBUG("  - min px dist: %d\n", min_px_dist);
     PRINT_DEBUG("  - KLT max pyramid level: %d\n", klt_pyramid_levels);
     PRINT_DEBUG("  - KLT window width: %d\n", klt_window_size);
+    PRINT_DEBUG("  - KLT maximum forward/backward error: %.3f px\n", klt_max_fb_error);
+    PRINT_DEBUG("  - KLT valid-only RANSAC input: %d\n", klt_ransac_valid_only);
     PRINT_DEBUG("  - hist method: %d\n", (int)histogram_method);
     PRINT_DEBUG("  - knn ratio: %.3f\n", knn_ratio);
     PRINT_DEBUG("  - track frequency: %.1f\n", track_frequency);

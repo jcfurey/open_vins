@@ -48,6 +48,8 @@ list(APPEND LIBRARY_SOURCES
         src/track/TrackAruco.cpp
         src/track/TrackDescriptor.cpp
         src/track/TrackKLT.cpp
+        src/track/TrackQuality.cpp
+        src/track/NeuralFlow.cpp
         src/track/TrackSIM.cpp
         src/types/Landmark.cpp
         src/feat/Feature.cpp
@@ -57,7 +59,7 @@ list(APPEND LIBRARY_SOURCES
 )
 file(GLOB_RECURSE LIBRARY_HEADERS "src/*.h")
 add_library(ov_core_lib SHARED ${LIBRARY_SOURCES} ${LIBRARY_HEADERS})
-target_link_libraries(ov_core_lib ${thirdparty_libraries})
+target_link_libraries(ov_core_lib PUBLIC ${thirdparty_libraries})
 target_include_directories(ov_core_lib PUBLIC src/)
 install(TARGETS ov_core_lib
         ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}

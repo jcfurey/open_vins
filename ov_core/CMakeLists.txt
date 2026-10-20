@@ -15,6 +15,7 @@ message(STATUS "OPENCV: " ${OpenCV_VERSION} " | BOOST: " ${Boost_VERSION})
 option(ENABLE_ROS "Enable or disable building with ROS (if it is found)" ON)
 
 # If we will compile with aruco support
+option(ENABLE_KLTNET_ONNX "Build the optional sparse learned tracker ONNX adapter (trained graph required)" OFF)
 option(ENABLE_ARUCO_TAGS "Enable or disable aruco tag (disable if no contrib modules)" ON)
 if (NOT ENABLE_ARUCO_TAGS)
     add_definitions(-DENABLE_ARUCO_TAGS=0)
@@ -55,3 +56,11 @@ endif ()
 
 
 
+
+target_compile_definitions(ov_core_lib PUBLIC ENABLE_KLTNET_ONNX=$<BOOL:${ENABLE_KLTNET_ONNX}>)
+if(ENABLE_KLTNET_ONNX)
+    if(NOT TARGET opencv_dnn)
+        message(FATAL_ERROR "ENABLE_KLTNET_ONNX requires the OpenCV dnn module")
+    endif()
+    target_link_libraries(ov_core_lib PRIVATE opencv_dnn)
+endif()

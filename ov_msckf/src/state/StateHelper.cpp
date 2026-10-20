@@ -147,32 +147,42 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
 
   //==========================================================
   //==========================================================
-  // Get covariance of the involved terms
-  Eigen::MatrixXd P_small = StateHelper::get_marginal_covariance(state, H_order);
+  // M_a already contains P*H^T. Gather its measured-state rows in H_order
+  // instead of constructing P_small and multiplying that covariance by H^T
+  // again. This matters for repeated landmark updates in larger filter states.
+  Eigen::MatrixXd measured_cross_covariance(H.cols(), H.rows());
+  Eigen::Index measured_row = 0;
+  for (const auto &variable : H_order) {
+    measured_cross_covariance.middleRows(measured_row, variable->size()) = M_a.middleRows(variable->id(), variable->size());
+    measured_row += variable->size();
+  }
+  assert(measured_row == H.cols());
 
   // Residual covariance S = H*Cov*H' + R
   Eigen::MatrixXd S(R.rows(), R.rows());
-  S.triangularView<Eigen::Upper>() = H * P_small * H.transpose();
+  S.triangularView<Eigen::Upper>() = H * measured_cross_covariance;
   S.triangularView<Eigen::Upper>() += R;
-  // Eigen::MatrixXd S = H * P_small * H.transpose() + R;
 
-  // Solve for the gain directly, without constructing an innovation covariance inverse.
+  // Whiten the cross covariance and residual with the innovation Cholesky
+  // factor. This gives both the correction and a symmetric covariance downdate
+  // without constructing the full gain or solving its second triangular system:
+  // W = L^-1 M^T, dx = W^T L^-1 res, P_new = P - W^T W.
   Eigen::LLT<Eigen::MatrixXd> innovation(S.selfadjointView<Eigen::Upper>());
   if (innovation.info() != Eigen::Success || !res.allFinite()) {
     PRINT_WARNING(YELLOW "EKF update rejected: invalid innovation covariance or residual\n" RESET);
     return;
   }
-  Eigen::MatrixXd K = innovation.solve(M_a.transpose()).transpose();
-  if (!K.allFinite()) {
-    PRINT_WARNING(YELLOW "EKF update rejected: nonfinite Kalman gain\n" RESET);
+  const Eigen::MatrixXd whitened_jacobian = innovation.matrixL().solve(M_a.transpose());
+  const Eigen::VectorXd whitened_residual = innovation.matrixL().solve(res);
+  const Eigen::VectorXd dx = whitened_jacobian.transpose() * whitened_residual;
+  if (!whitened_jacobian.allFinite() || !whitened_residual.allFinite() || !dx.allFinite()) {
+    PRINT_WARNING(YELLOW "EKF update rejected: nonfinite whitened system or correction\n" RESET);
     return;
   }
 
-  // Update Covariance
-  state->_Cov.triangularView<Eigen::Upper>() -= K * M_a.transpose();
+  // Compute only the authoritative triangle of this symmetric rank-k update.
+  state->_Cov.selfadjointView<Eigen::Upper>().rankUpdate(whitened_jacobian.transpose(), -1.0);
   state->_Cov = state->_Cov.selfadjointView<Eigen::Upper>();
-  // Cov -= K * M_a.transpose();
-  // Cov = 0.5*(Cov+Cov.transpose());
 
   // We should check if we are not positive semi-definitate (i.e. negative diagionals is not s.p.d)
   Eigen::VectorXd diags = state->_Cov.diagonal();
@@ -188,7 +198,6 @@ void StateHelper::EKFUpdate(std::shared_ptr<State> state, const std::vector<std:
   }
 
   // Calculate our delta and update all our active states
-  Eigen::VectorXd dx = K * res;
   for (size_t i = 0; i < state->_variables.size(); i++) {
     state->_variables.at(i)->update(dx.block(state->_variables.at(i)->id(), 0, state->_variables.at(i)->size(), 1));
   }

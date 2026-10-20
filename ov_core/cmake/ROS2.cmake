@@ -39,6 +39,8 @@ list(APPEND LIBRARY_SOURCES
         src/track/TrackAruco.cpp
         src/track/TrackDescriptor.cpp
         src/track/TrackKLT.cpp
+        src/track/TrackQuality.cpp
+        src/track/NeuralFlow.cpp
         src/track/TrackSIM.cpp
         src/types/Landmark.cpp
         src/feat/Feature.cpp
@@ -99,6 +101,22 @@ if(BUILD_TESTING)
     target_link_libraries(test_camera_models ov_core_lib)
     ament_add_gtest(test_klt_buffers test/test_klt_buffers.cpp)
     target_link_libraries(test_klt_buffers ov_core_lib)
+    ament_add_gtest(test_klt_outliers test/test_klt_outliers.cpp)
+    target_link_libraries(test_klt_outliers ov_core_lib)
+    ament_add_gtest(test_observation_quality test/test_observation_quality.cpp)
+    target_link_libraries(test_observation_quality ov_core_lib)
+    ament_add_gtest(test_neural_flow test/test_neural_flow.cpp)
+    target_link_libraries(test_neural_flow ov_core_lib)
+    if(ENABLE_KLTNET_ONNX)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        set(SPARSE_TRACKER_FIXTURE "${CMAKE_CURRENT_BINARY_DIR}/sparse_tracker_contract_fixture.onnx")
+        add_custom_command(OUTPUT "${SPARSE_TRACKER_FIXTURE}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test/make_sparse_tracker_fixture.py" "${SPARSE_TRACKER_FIXTURE}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/make_sparse_tracker_fixture.py" VERBATIM)
+        add_custom_target(sparse_tracker_fixture DEPENDS "${SPARSE_TRACKER_FIXTURE}")
+        add_dependencies(test_neural_flow sparse_tracker_fixture)
+        target_compile_definitions(test_neural_flow PRIVATE SPARSE_TRACKER_FIXTURE="${SPARSE_TRACKER_FIXTURE}")
+    endif()
 endif()
 
 # finally define this as the package

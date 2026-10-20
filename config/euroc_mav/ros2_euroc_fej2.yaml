@@ -1,0 +1,36 @@
+# Experimental optional backend; accuracy gains are unproven. Same dense600 configuration.
+/**:
+  ros__parameters:
+    calib_cam_extrinsics: false
+    calib_cam_timeoffset: false
+    camera_qos_depth: 64
+    executor_threads: 1
+    init_dyn_min_features: 25
+    init_dyn_mle_max_threads: 1
+    init_dyn_use: true
+    klt_pyramid_levels: 3
+    klt_window_size: 15
+    loop_depth.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth_colored.enable_pub_plugins:
+    - image_transport/raw
+    max_camera_queue_size: 64
+    max_clones: 25
+    max_msckf_in_update: 120
+    max_slam: 60
+    num_opencv_threads: 2
+    num_pts: 600
+    qos_overrides./cam0/image_raw.subscription.depth: 64
+    qos_overrides./cam0/image_raw.subscription.reliability: reliable
+    qos_overrides./cam1/image_raw.subscription.depth: 64
+    qos_overrides./cam1/image_raw.subscription.reliability: reliable
+    qos_overrides./imu0.subscription.depth: 1000
+    qos_overrides./imu0.subscription.reliability: reliable
+    trackhist.enable_pub_plugins:
+    - image_transport/raw
+    try_zupt: true
+    use_sim_time: true
+    verbosity: INFO
+    zupt_only_at_beginning: true
+    visual_update_backend: fej2
+    tracking_backend: native

@@ -325,6 +325,26 @@ TEST(EkfUpdate, MatchesDenseUpdateOverACorrelatedSubsetOfTheState) {
   EXPECT_LT((estimate->_imu->value().bottomRows(12) - expected).norm(), 1e-9 * expected.norm());
 }
 
+TEST(EkfUpdate, MatchesTallRankDeficientMeasurementPosterior) {
+  auto estimate = state();
+  srand(19);
+  const Eigen::MatrixXd root = Eigen::MatrixXd::Random(15, 15);
+  const Eigen::MatrixXd prior = root * root.transpose() + 0.5 * Eigen::MatrixXd::Identity(15, 15);
+  StateHelper::set_initial_covariance(estimate, prior, {estimate->_imu});
+  const Eigen::VectorXd before = estimate->_imu->value();
+  Eigen::MatrixXd H = Eigen::MatrixXd::Random(45, 15);
+  H.rightCols(4).setZero();
+  const Eigen::VectorXd residual = 1e-3 * Eigen::VectorXd::Random(45);
+  const Eigen::MatrixXd noise = .4 * Eigen::MatrixXd::Identity(45, 45);
+  const Eigen::MatrixXd innovation = H * prior * H.transpose() + noise;
+  const Eigen::MatrixXd gain = innovation.llt().solve((prior * H.transpose()).transpose()).transpose();
+  const Eigen::MatrixXd expected_covariance = prior - gain * H * prior;
+  const Eigen::VectorXd expected_delta = gain * residual;
+  StateHelper::EKFUpdate(estimate, {estimate->_imu}, H, residual, noise);
+  EXPECT_LT((StateHelper::get_full_covariance(estimate) - expected_covariance).norm(), 1e-10 * prior.norm());
+  EXPECT_LT((estimate->_imu->value().bottomRows(12) - before.tail(12) - expected_delta.tail(12)).norm(), 1e-11);
+}
+
 TEST(Ros2PointCloud, EmptyFeaturesProduceAValidEmptyCloud) {
   const auto cloud = ROSVisualizerHelper::get_ros_pointcloud(nullptr, {});
   EXPECT_EQ(cloud.width, 0U);

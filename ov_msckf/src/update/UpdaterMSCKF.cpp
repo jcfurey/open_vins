@@ -22,6 +22,7 @@
 #include "UpdaterMSCKF.h"
 
 #include "UpdaterHelper.h"
+#include "VisualUpdate.h"
 
 #include "feat/Feature.h"
 #include "feat/FeatureInitializer.h"
@@ -164,6 +165,7 @@ void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_
   std::vector<std::shared_ptr<Type>> Hx_order_big;
   size_t ct_jacob = 0;
   size_t ct_meas = 0;
+  std::vector<VisualUpdate::Innovation> innovations;
 
   // 4. Compute linear system for each feature, nullspace project, and reject
   auto it2 = feature_vec.begin();
@@ -175,6 +177,7 @@ void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_
     feat.uvs = (*it2)->uvs;
     feat.uvs_norm = (*it2)->uvs_norm;
     feat.timestamps = (*it2)->timestamps;
+    feat.observation_covariances = (*it2)->observation_covariances;
 
     // If we are using single inverse depth, then it is equivalent to using the msckf inverse depth
     feat.feat_representation = state->_options.feat_rep_msckf;
@@ -202,12 +205,23 @@ void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_
     // Get the Jacobian for this feature
     UpdaterHelper::get_feature_jacobian_full(state, feat, H_f, H_x, res, Hx_order);
 
+    if (_options.use_observation_covariance && !VisualUpdate::whiten(feat.observation_covariances, feat.timestamps, H_f, H_x, res)) {
+      (*it2)->to_delete = true;
+      it2 = feature_vec.erase(it2);
+      continue;
+    }
+
     // Nullspace project
     UpdaterHelper::nullspace_project_inplace(H_f, H_x, res);
 
     /// Chi2 distance check
     Eigen::MatrixXd P_marg = StateHelper::get_marginal_covariance(state, Hx_order);
     Eigen::MatrixXd S = H_x * P_marg * H_x.transpose();
+    if (_options.calibrate_innovation) {
+      VisualUpdate::Innovation block;
+      if (VisualUpdate::innovation(S, res, _options.sigma_pix_sq, block))
+        innovations.push_back(std::move(block));
+    }
     S.diagonal() += _options.sigma_pix_sq * Eigen::VectorXd::Ones(S.rows());
     double chi2 = res.dot(S.llt().solve(res));
 
@@ -279,7 +293,12 @@ void UpdaterMSCKF::update(std::shared_ptr<State> state, std::vector<std::shared_
   rT4 = boost::posix_time::microsec_clock::local_time();
 
   // Our noise is isotropic, so make it here after our compression
-  Eigen::MatrixXd R_big = _options.sigma_pix_sq * Eigen::MatrixXd::Identity(res_big.rows(), res_big.rows());
+  const double inflation = _options.calibrate_innovation
+      ? VisualUpdate::minimum_inflation(innovations, _options.innovation_max_variance, _options.innovation_quantile,
+                                      _options.innovation_min_blocks) : 1.0;
+  Eigen::MatrixXd R_big = (inflation * _options.sigma_pix_sq) * Eigen::MatrixXd::Identity(res_big.rows(), res_big.rows());
+  if (_options.calibrate_innovation && ++diagnostic_updates % 100 == 1)
+    PRINT_INFO("[RDIC-MSCKF] pre-gate blocks=%zu accepted=%zu variance_scale=%.3f\n", innovations.size(), feature_vec.size(), inflation);
 
   // 6. With all good features update the state
   StateHelper::EKFUpdate(state, Hx_order_big, Hx_big, res_big, R_big);

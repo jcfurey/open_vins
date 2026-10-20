@@ -73,6 +73,7 @@ list(APPEND LIBRARY_SOURCES
         src/core/VioManager.cpp
         src/core/VioManagerHelper.cpp
         src/update/UpdaterHelper.cpp
+        src/update/VisualUpdate.cpp
         src/update/UpdaterMSCKF.cpp
         src/update/UpdaterSLAM.cpp
         src/update/UpdaterZeroVelocity.cpp
@@ -141,6 +142,10 @@ if(BUILD_TESTING)
     target_link_libraries(test_ros2_measurement_buffer ov_msckf_lib)
     ament_add_gtest(test_estimation_regressions test/test_estimation_regressions.cpp)
     target_link_libraries(test_estimation_regressions ov_msckf_lib)
+    ament_add_gtest(test_measurement_compression test/test_measurement_compression.cpp)
+    target_link_libraries(test_measurement_compression ov_msckf_lib)
+    ament_add_gtest(test_visual_backends test/test_visual_backends.cpp)
+    target_link_libraries(test_visual_backends ov_msckf_lib)
     ament_add_gtest(test_serial_replay test/test_serial_replay.cpp)
     target_link_libraries(test_serial_replay ov_msckf_lib)
 endif()

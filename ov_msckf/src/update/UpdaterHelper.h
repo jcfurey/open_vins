@@ -24,7 +24,10 @@
 
 #include <Eigen/Eigen>
 #include <memory>
+#include <optional>
 #include <unordered_map>
+
+#include "feat/ObservationCovariance.h"
 
 #include "types/LandmarkRepresentation.h"
 
@@ -65,6 +68,8 @@ public:
     /// Timestamps of each UV measurement (mapped by camera ID)
     std::unordered_map<size_t, std::vector<double>> timestamps;
 
+    ov_core::ObservationCovariances observation_covariances;
+
     /// What representation our feature is in
     ov_type::LandmarkRepresentation::Representation feat_representation;
 
@@ -97,7 +102,8 @@ public:
    * @param[out] x_order Extra variables our extra Jacobian has (for example anchored pose)
    */
   static void get_feature_jacobian_representation(std::shared_ptr<State> state, UpdaterHelperFeature &feature, Eigen::MatrixXd &H_f,
-                                                  std::vector<Eigen::MatrixXd> &H_x, std::vector<std::shared_ptr<ov_type::Type>> &x_order);
+                                                  std::vector<Eigen::MatrixXd> &H_x, std::vector<std::shared_ptr<ov_type::Type>> &x_order,
+                                                  std::optional<bool> use_fej = std::nullopt);
 
   /**
    * @brief Will construct the "stacked" Jacobians for a single feature from all its measurements
@@ -110,7 +116,8 @@ public:
    * @param[out] x_order Extra variables our extra Jacobian has (for example anchored pose)
    */
   static void get_feature_jacobian_full(std::shared_ptr<State> state, UpdaterHelperFeature &feature, Eigen::MatrixXd &H_f,
-                                        Eigen::MatrixXd &H_x, Eigen::VectorXd &res, std::vector<std::shared_ptr<ov_type::Type>> &x_order);
+                                        Eigen::MatrixXd &H_x, Eigen::VectorXd &res, std::vector<std::shared_ptr<ov_type::Type>> &x_order,
+                                        std::optional<bool> use_fej = std::nullopt);
 
   /**
    * @brief This will project the left nullspace of H_f onto the linear system.

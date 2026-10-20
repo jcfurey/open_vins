@@ -163,11 +163,19 @@ The following settings supplement the estimator configuration:
 | `track_image_publish_rate` | `10.0` | Maximum diagnostic tracking image rate, Hz; zero disables it |
 | `klt_pyramid_levels` | `5` | Maximum optical-flow pyramid level, from 0 to 8 |
 | `klt_window_size` | `15` | Odd optical-flow patch width, from 3 to 63 pixels |
+| `klt_max_fb_error` | `0.0` | Experimental round-trip flow threshold in processed pixels; zero disables. Positive values also enable valid-only RANSAC inputs. |
+| `klt_ransac_valid_only` | `false` | Experimental filtering of failed/invalid flow predictions before RANSAC. |
 | `max_imu_history_seconds` | `10.0` | Initialized estimator history limit without camera updates |
 | `reset_on_time_jump` | `true` | Reset on large backward IMU timestamp jumps |
 | `topic_imu`, `topic_camera0`, `topic_camera1`, ... | Calibration topics | Explicit sensor topic aliases |
 | `global_frame_id` / `imu_frame_id` | `global` / `imu` | Pose parent and odometry child frames |
 | `camera_frame_prefix` / `truth_frame_id` | `cam` / `truth` | Camera TF prefix and ground-truth child frame |
+
+The two experimental KLT checks remain off by default. A five-flight Machine Hall
+accuracy screen found sequence regressions, so they are ablation tools rather than
+a recommended accuracy preset. They preserve track indexing and do not use ground
+truth. Synthetic tests cover invalid predictions, occlusion and round-trip tracking;
+trajectory-level comparisons are still required for each proposed configuration.
 
 Pose, odometry, TF, image, and feature headers use measurement time. Tracking
 images retain camera acquisition time, including before initialization; state
@@ -179,6 +187,110 @@ skipped without subscribers, and tracking visualization stays on the estimator
 worker. The existing `loop_feats` interface retains its legacy `PointCloud`
 message type for downstream compatibility; ordinary feature clouds use
 `PointCloud2`.
+
+### Optional research backends
+
+`visual_update_backend` selects `standard` (default), `rdic`, `fej2`, or
+`rdic_fej2`. The optional methods change the measurement model/update, and do
+not consume ground truth. They are experimental and are not accuracy guarantees.
+The matching EuRoC presets are `config/euroc_mav/ros2_euroc_rdic.yaml`,
+`ros2_euroc_fej2.yaml`, and `ros2_euroc_rdic_fej2.yaml`; each retains the dense600
+feature, clone, calibration, initialization, and transport settings.
+
+* **RDIC-inspired uncertainty core:** robust per-frame tracking diagnostics
+  (temporal photometric error, left/right imbalance, calibrated stereo epipolar
+  error, bounded selective round-trip checks, and parallax change) set pixel
+  covariance. Robust patch-gradient information adds directional uncertainty.
+  Covariance is whitened **before** MSCKF landmark or SLAM bearing elimination,
+  preserving correlated anisotropic measurement noise. A batch calibration uses
+  the empirical normalized-innovation quantile collected before chi-square
+  rejection to find the smallest bounded variance inflation. The implementation
+  retains this fork's feature selection and budgets; it is not a full reproduction
+  of the paper's feature-management policy. Shared state makes the block
+  innovations correlated, so this empirical calibration is not a formal
+  independent chi-square consistency test. Source:
+  [RDIC-MSCKF (2026)](https://www.mdpi.com/2075-1702/14/9/1004).
+* **FEJ2:** persistent SLAM measurements evaluate both current and first-estimate
+  Jacobians, whiten the measurement noise, and project the update onto the left
+  nullspace of the current-pose Jacobian discrepancy. QR determines its rank. Transient
+  MSCKF features retain ordinary FEJ, as specified by the technical report's
+  practical MSCKF-VIO design (§2.4.2). Anchor and calibration variables remain in
+  the update; they are not additional discrepancy columns. A zero discrepancy
+  preserves the update, while a full-row-rank discrepancy leaves no update.
+  Projection follows the existing `max_slam_in_update` batches (25 in the EuRoC
+  configuration); changing that size changes the information discarded per update.
+  `use_fej: true` is required. Sources:
+  [FEJ2 paper](https://pgeneva.com/downloads/papers/Chen2022ICRA.pdf),
+  [technical report](https://yangyulin.net/papers/rpng_tr_2022_fej2.pdf).
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `visual_update_backend` | `standard` | Measurement update selection |
+| `rdic_max_variance` | `4.0` | Maximum scalar **variance** inflation, minimum 1 |
+| `rdic_quantile` | `0.8` | Empirical innovation calibration quantile |
+| `rdic_min_blocks` | `6` | Minimum pre-gate feature blocks before calibration |
+| `fej2_rank_tolerance` | `1e-6` | Relative rank threshold for the whitened discrepancy |
+| `tracking_backend` | `native` | Existing KLT/descriptor selection, or `kltnet_onnx` |
+| `kltnet_model_path` | empty | Required complete trained ONNX export |
+| `kltnet_target` | `cpu` | OpenCV DNN `cpu` or available `cuda` target |
+| `kltnet_min_confidence` | `0.1` | Export-specific relative-confidence rejection threshold |
+
+#### Learned tracking integration
+
+The optional `kltnet_onnx` frontend loads a **complete trained sparse tracker**
+through OpenCV DNN. It retains each feature's original reference patch and previous
+displacement, handles feature-ID reassignment and dead-track cleanup, rejects
+invalid/low-confidence predictions, and fits geometry only to valid predictions.
+Stereo detection/matching remains native LK; temporal tracking uses the graph.
+The learned confidence is used for rejection, not directly substituted for the
+estimator's pixel covariance. This follows the OpenVINS integration approach in
+[KLTNet (2026)](https://arxiv.org/html/2608.24544v1).
+
+**This is an inference adapter, not an implementation or trained release of the
+KLTNet neural architecture.** No author code/weights were available during this
+integration. Running KLTNet requires trained assets exported/wrapped to this
+explicit interface, including its coarse-flow network and triplet-patch refiner.
+The included ONNX graph is a deterministic **test fixture only**, never a tracking
+model or an accuracy baseline. Actual KLTNet accuracy and 1× throughput are untested.
+
+Build `ov_core` with `-DENABLE_KLTNET_ONNX=ON` (default OFF), then rebuild `ov_init`
+and `ov_msckf` against that same install. This work changes core feature metadata
+and tracker interfaces, so rebuilding all three packages is required for any
+backend. `ros2_euroc_kltnet_template.yaml` deliberately fails until a model path is
+provided. Invalid/unavailable models or inference targets fail explicitly.
+
+The graph contract uses float32 tensors, unrectified grayscale input with values
+in `[0,1]`, pixel coordinates `(x,y)`, and dynamic track count `N`:
+
+| Name | Shape | Meaning |
+| --- | --- | --- |
+| `image_previous`, `image_current` | `[1,1,H,W]` | Consecutive processed images |
+| `points_previous` | `[1,1,N,2]` | Previous feature locations |
+| `flow_previous` | `[1,1,N,2]` | Previous displacement; zero for a new track |
+| `patch_reference` | `[N,1,31,31]` | Fixed initial patches; bilinear sampling, replicated borders |
+| `points_current` (output) | `[1,1,N,2]` | Predicted absolute pixel locations |
+| `confidence` (output) | `[N,1]` | Finite export-defined relative confidence |
+
+Set histogram preprocessing and the confidence threshold to match the trained
+model. The template uses `histogram_method: NONE`; image downsampling must also
+match training. Export with operations supported by your OpenCV DNN build.
+
+The workspace helper `scripts/benchmark_open_vins_backends.py --output <directory>`
+runs all four visual backends on all five Machine Hall flights at 1×. It rotates
+condition order, verifies actual core/initializer/estimator library hashes, and
+retains input, continuity, coverage, error, and pose-age failures. Its default one
+run per cell is exploratory; repeat runs before claiming an accuracy gain. The
+RViz playlist accepts `--overlay <install> --ros-params-file <preset>` and retains
+the ground-truth overlay and calibrated sensor model.
+
+The 20 October 2026 Machine Hall screen completed all 20 full flights at 1× with
+zero drops/resets and maximum P95 pose age below 0.093 s. Mean position ATE was
+9.70 cm (`standard`), 12.90 cm (`rdic`), 11.20 cm (`fej2`), and 13.97 cm
+(`rdic_fej2`). Each optional mode has sequence regressions; none was promoted.
+This is one live run per cell, with ground truth used only by the scorer.
+The enabled build passes 99 individual tests across core, initializer and
+estimator; the ONNX-disabled core separately passes 22 tests. Full results and
+source/library fingerprints are in the workspace report above.
 
 ### Regression checks
 

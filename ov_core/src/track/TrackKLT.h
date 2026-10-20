@@ -23,6 +23,9 @@
 #define OV_CORE_TRACK_KLT_H
 
 #include "TrackBase.h"
+#include "TrackQuality.h"
+#include "NeuralFlow.h"
+#include <cmath>
 #include <stdexcept>
 
 namespace ov_core {
@@ -53,14 +56,19 @@ public:
    * @param minpxdist features need to be at least this number pixels away from each other
    * @param pyramid_levels maximum optical-flow pyramid level (zero tracks at the original resolution)
    * @param window_size odd optical-flow patch width in pixels
+   * @param max_fb_error maximum forward/backward optical-flow error in pixels; zero disables the check
+   * @param ransac_valid_only exclude failed optical-flow predictions before fitting the geometric model
    */
   explicit TrackKLT(std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras, int numfeats, int numaruco, bool stereo,
-                    HistogramMethod histmethod, int fast_threshold, int gridx, int gridy, int minpxdist,
-                    int pyramid_levels = 5, int window_size = 15)
+                    HistogramMethod histmethod, int fast_threshold, int gridx, int gridy, int minpxdist, int pyramid_levels = 5,
+                    int window_size = 15, double max_fb_error = 0.0, bool ransac_valid_only = false)
       : TrackBase(cameras, numfeats, numaruco, stereo, histmethod), threshold(fast_threshold), grid_x(gridx), grid_y(gridy),
-        min_px_dist(minpxdist), pyr_levels(pyramid_levels), win_size(window_size, window_size) {
+        min_px_dist(minpxdist), pyr_levels(pyramid_levels), win_size(window_size, window_size), max_fb_error(max_fb_error),
+        ransac_valid_only(ransac_valid_only) {
     if (pyramid_levels < 0 || pyramid_levels > 8 || window_size < 3 || window_size > 63 || window_size % 2 == 0)
       throw std::invalid_argument("KLT pyramid level must be 0..8 and window width must be odd, 3..63 pixels");
+    if (!std::isfinite(max_fb_error) || max_fb_error < 0.0)
+      throw std::invalid_argument("KLT forward/backward error must be finite and nonnegative");
     for (const auto &camera : camera_calib) {
       img_pyramid_last[camera.first];
       img_curr[camera.first];
@@ -76,6 +84,12 @@ public:
    */
   void feed_new_camera(const CameraData &message) override;
 
+  /// Startup selection; calibration may be refreshed between camera feeds by the estimator.
+  void set_observation_uncertainty(bool enabled, const std::map<size_t, Eigen::VectorXd> &extrinsics);
+
+  /// Select a complete trained sparse-tracking graph. Failure to load is fatal; there is no silent LK fallback.
+  void set_neural_tracker(const std::string &model_path, const std::string &target, double min_confidence);
+
 protected:
   /// One camera's tracking result. New features carry pending ids until commit_monocular() applies the result.
   struct MonocularTrack {
@@ -86,6 +100,8 @@ protected:
     std::vector<size_t> ids;
     size_t detected = 0;          ///< pending ids handed out by detection
     bool update_database = false; ///< false when tracking (re)started in this image
+    std::vector<cv::Point2f> source_points;
+    std::vector<FlowQuality> quality;
   };
 
   /**
@@ -161,7 +177,18 @@ protected:
    * If the second vector is non-empty, it will be used as an initial guess of where the keypoints are in the second image.
    */
   void perform_matching(const std::vector<cv::Mat> &img0pyr, const std::vector<cv::Mat> &img1pyr, std::vector<cv::KeyPoint> &pts0,
-                        std::vector<cv::KeyPoint> &pts1, size_t id0, size_t id1, std::vector<uchar> &mask_out);
+                        std::vector<cv::KeyPoint> &pts1, size_t id0, size_t id1, std::vector<uchar> &mask_out,
+                        std::vector<FlowQuality> *diagnostics = nullptr, const std::vector<size_t> *feature_ids = nullptr);
+
+  std::vector<Eigen::Matrix2d> observation_covariance(size_t camera, const cv::Mat &previous, const cv::Mat &current,
+                                                    const std::vector<cv::Point2f> &old_points,
+                                                    const std::vector<cv::KeyPoint> &points, const std::vector<size_t> &ids,
+                                                    const std::vector<FlowQuality> &diagnostics);
+
+  /// Fit the epipolar model using only successful, finite, in-image optical-flow correspondences.
+  /// The returned mask retains the original indexing, including rejected entries.
+  std::vector<uchar> geometric_inlier_mask(const std::vector<cv::Point2f> &pts0, const std::vector<cv::Point2f> &pts1,
+                                           const std::vector<uchar> &flow_status, size_t id0, size_t id1, bool valid_only = true);
 
   // Parameters for our FAST grid detector
   int threshold;
@@ -174,6 +201,18 @@ protected:
   // How many pyramid levels to track
   int pyr_levels = 5;
   cv::Size win_size = cv::Size(15, 15);
+
+  /// Round-trip consistency threshold in processed-image pixels; zero preserves one-way tracking.
+  double max_fb_error = 0.0;
+
+  /// Experimental geometric-model input filtering. Leave off until trajectory-level validation supports enabling it.
+  bool ransac_valid_only = false;
+
+  bool observation_uncertainty = false;
+  std::shared_ptr<NeuralFlow> neural_flow;
+  double neural_min_confidence = 0.1;
+  std::map<size_t, Eigen::Matrix4d> quality_extrinsics;
+  std::map<size_t, std::unordered_map<size_t, size_t>> quality_ages;
 
   // Two independent image/pyramid buffers per camera, swapped after tracking.
   // Never overwrite the previous frame while optical flow still references it.

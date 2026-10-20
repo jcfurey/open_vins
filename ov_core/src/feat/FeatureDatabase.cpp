@@ -49,6 +49,7 @@ bool FeatureDatabase::get_feature_clone(size_t id, Feature &feat) {
   feat.uvs = temp->uvs;
   feat.uvs_norm = temp->uvs_norm;
   feat.timestamps = temp->timestamps;
+  feat.observation_covariances = temp->observation_covariances;
   feat.anchor_cam_id = temp->anchor_cam_id;
   feat.anchor_clone_timestamp = temp->anchor_clone_timestamp;
   feat.p_FinA = temp->p_FinA;
@@ -56,7 +57,8 @@ bool FeatureDatabase::get_feature_clone(size_t id, Feature &feat) {
   return true;
 }
 
-void FeatureDatabase::update_feature(size_t id, double timestamp, size_t cam_id, float u, float v, float u_n, float v_n) {
+void FeatureDatabase::update_feature(size_t id, double timestamp, size_t cam_id, float u, float v, float u_n, float v_n,
+                                     const Eigen::Matrix2d *relative_pixel_covariance) {
 
   // Find this feature using the ID lookup
   std::lock_guard<std::mutex> lck(mtx);
@@ -67,6 +69,8 @@ void FeatureDatabase::update_feature(size_t id, double timestamp, size_t cam_id,
     feat->uvs[cam_id].push_back(Eigen::Vector2f(u, v));
     feat->uvs_norm[cam_id].push_back(Eigen::Vector2f(u_n, v_n));
     feat->timestamps[cam_id].push_back(timestamp);
+    if (relative_pixel_covariance)
+      feat->observation_covariances[cam_id][timestamp] = *relative_pixel_covariance;
     return;
   }
 
@@ -79,6 +83,8 @@ void FeatureDatabase::update_feature(size_t id, double timestamp, size_t cam_id,
   feat->uvs[cam_id].push_back(Eigen::Vector2f(u, v));
   feat->uvs_norm[cam_id].push_back(Eigen::Vector2f(u_n, v_n));
   feat->timestamps[cam_id].push_back(timestamp);
+  if (relative_pixel_covariance)
+    feat->observation_covariances[cam_id][timestamp] = *relative_pixel_covariance;
 
   // Append this new feature into our database
   features_idlookup[id] = feat;
@@ -293,6 +299,8 @@ void FeatureDatabase::append_new_measurements(const std::shared_ptr<FeatureDatab
           temp->timestamps[cam_id] = feat.second->timestamps.at(cam_id);
           temp->uvs[cam_id] = feat.second->uvs.at(cam_id);
           temp->uvs_norm[cam_id] = feat.second->uvs_norm.at(cam_id);
+          if (feat.second->observation_covariances.count(cam_id))
+            temp->observation_covariances[cam_id] = feat.second->observation_covariances.at(cam_id);
         } else {
           auto temp_times = temp->timestamps.at(cam_id);
           for (size_t i = 0; i < feat.second->timestamps.at(cam_id).size(); i++) {
@@ -301,6 +309,9 @@ void FeatureDatabase::append_new_measurements(const std::shared_ptr<FeatureDatab
               temp->timestamps.at(cam_id).push_back(feat.second->timestamps.at(cam_id).at(i));
               temp->uvs.at(cam_id).push_back(feat.second->uvs.at(cam_id).at(i));
               temp->uvs_norm.at(cam_id).push_back(feat.second->uvs_norm.at(cam_id).at(i));
+              auto camera = feat.second->observation_covariances.find(cam_id);
+              if (camera != feat.second->observation_covariances.end() && camera->second.count(time_to_find))
+                temp->observation_covariances[cam_id][time_to_find] = camera->second.at(time_to_find);
             }
           }
         }
@@ -314,6 +325,7 @@ void FeatureDatabase::append_new_measurements(const std::shared_ptr<FeatureDatab
       temp->timestamps = feat.second->timestamps;
       temp->uvs = feat.second->uvs;
       temp->uvs_norm = feat.second->uvs_norm;
+      temp->observation_covariances = feat.second->observation_covariances;
       features_idlookup[feat.first] = temp;
     }
   }

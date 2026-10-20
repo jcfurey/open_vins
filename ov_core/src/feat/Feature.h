@@ -22,6 +22,8 @@
 #ifndef OV_CORE_FEATURE_H
 #define OV_CORE_FEATURE_H
 
+#include "ObservationCovariance.h"
+
 #include <Eigen/Eigen>
 #include <iostream>
 #include <unordered_map>
@@ -53,6 +55,9 @@ public:
 
   /// Timestamps of each UV measurement (mapped by camera ID)
   std::unordered_map<size_t, std::vector<double>> timestamps;
+
+  /// Optional relative pixel covariances; sparse timestamp keys avoid index drift during pruning.
+  ObservationCovariances observation_covariances;
 
   /// What camera ID our pose is anchored in!! By default the first measurement is the anchor.
   int anchor_cam_id = -1;
