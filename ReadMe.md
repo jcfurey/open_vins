@@ -376,6 +376,15 @@ Feature-ID reassignment, dead-track cleanup, image-buffer reuse, and unavailable
 motion are handled explicitly. Cumulative runtime counters show which stages
 actually ran. These are candidate accuracy changes, not established improvements.
 
+Patch fits use a reusable bounded worker pool per camera, including the caller
+as a participant. The participant count is `min(4, num_opencv_threads / cameras)`,
+with a minimum of one. Independent fits can run concurrently inside OpenCV's
+camera-parallel region; reference updates and feature-ID commits stay serial.
+A regression test verifies identical serial/parallel pixels, errors and reference
+counts. The initial serial reference screen exceeded the 0.5 s P95 pose-age gate
+on three flights; those complete attempts are retained in the workspace study.
+Use the separate optimized install for the final comparison.
+
 The workspace helper `scripts/benchmark_open_vins_gyro.py --output <directory>`
 runs all four modes twice on all five complete Machine Hall flights at 1× with
 rotated condition order, equal dense600 budgets and verified loaded libraries.

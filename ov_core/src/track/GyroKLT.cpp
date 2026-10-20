@@ -3,6 +3,11 @@
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
+#include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <thread>
 
 namespace ov_core {
 namespace {
@@ -22,12 +27,66 @@ Eigen::Vector2d gradient(const cv::Mat &image, float x, float y) {
 }
 } // namespace
 
-GyroKLT::GyroKLT(std::shared_ptr<CamBase> camera, std::string mode, int window, int reference_age)
+// A bounded, reusable pool also works inside OpenCV's camera-parallel region,
+// where nested cv::parallel_for_ would execute serially. Only independent pixel
+// fits run here; references, IDs, counters and database commits remain serial.
+struct GyroKLT::Workers {
+  std::vector<std::thread> threads;
+  std::mutex mutex;
+  std::condition_variable ready,done;
+  std::function<void(size_t)> job;
+  std::atomic<size_t> next{0};
+  size_t count=0,generation=0,remaining=0;
+  bool stopping=false;
+  std::exception_ptr exception;
+  explicit Workers(int number) {
+    try {
+      for(int i=1;i<number;++i) threads.emplace_back([this] {
+        size_t seen=0;
+        std::unique_lock<std::mutex> lock(mutex);
+        while(true) {
+          ready.wait(lock,[&]{return stopping || generation!=seen;});
+          if(stopping)return;
+          seen=generation;lock.unlock();execute();lock.lock();
+          if(--remaining==0)done.notify_one();
+        }
+      });
+    } catch(...) {stop();throw;}
+  }
+  ~Workers(){stop();}
+  void stop() {
+    {std::lock_guard<std::mutex> lock(mutex);stopping=true;}
+    ready.notify_all();for(auto &thread:threads)if(thread.joinable())thread.join();
+  }
+  void execute() {
+    try {
+      while(true){const size_t i=next.fetch_add(1,std::memory_order_relaxed);if(i>=count)break;job(i);}
+    } catch(...) {
+      std::lock_guard<std::mutex> lock(mutex);
+      if(!exception)exception=std::current_exception();
+      next.store(count,std::memory_order_relaxed);
+    }
+  }
+  void run(size_t n,const std::function<void(size_t)> &function) {
+    if(threads.empty() || n<8){for(size_t i=0;i<n;++i)function(i);return;}
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      job=function;count=n;next.store(0,std::memory_order_relaxed);exception=nullptr;remaining=threads.size();++generation;
+    }
+    ready.notify_all();execute();
+    std::unique_lock<std::mutex> lock(mutex);done.wait(lock,[&]{return remaining==0;});job={};
+    if(exception)std::rethrow_exception(exception);
+  }
+};
+
+GyroKLT::GyroKLT(std::shared_ptr<CamBase> camera, std::string mode, int window, int reference_age, int threads)
     : camera(std::move(camera)), mode(std::move(mode)), window(window), reference_age(reference_age) {
   if (!this->camera || (this->mode != "seed" && this->mode != "affine" && this->mode != "reference") ||
-      window < 3 || window > 63 || window % 2 == 0 || reference_age < 1 || reference_age > 100)
+      window < 3 || window > 63 || window % 2 == 0 || reference_age < 1 || reference_age > 100 || threads<1 || threads>16)
     throw std::invalid_argument("Invalid gyro KLT mode/window/reference age");
+  workers=std::make_unique<Workers>(this->mode=="seed" ? 1 : threads);
 }
+GyroKLT::~GyroKLT()=default;
 
 void GyroKLT::begin_frame(const Eigen::Matrix3d *rotation) {
   ++frame;
@@ -154,26 +213,36 @@ void GyroKLT::refine(const std::vector<cv::Mat> &previous_raw, const std::vector
   if (!prediction_valid || mode=="seed" || previous_raw.empty() || current_raw.empty()) return;
   if (previous.size()!=ids.size() || current.size()!=ids.size() || status.size()!=ids.size())
     throw std::invalid_argument("Gyro KLT point/id/status sizes differ");
-  for (size_t i=0;i<ids.size();++i) {
-    if (!status[i]) continue;
-    Reference local=make_reference(previous_raw,previous[i],previous_orientation);
-    const Reference *reference=&local;
+  std::vector<Reference> local(ids.size());
+  std::vector<const Reference *> selected(ids.size(),nullptr);
+  std::vector<uchar> retained(ids.size(),0),success(ids.size(),0);
+  for(size_t i=0;i<ids.size();++i) {
+    if(!status[i])continue;
     auto found=references.find(ids[i]);
-    if (mode=="reference" && found!=references.end() && frame-found->second.frame<=static_cast<size_t>(reference_age))
-      reference=&found->second;
-    const bool retained=reference!=&local;
+    if(mode=="reference" && found!=references.end() && frame-found->second.frame<=static_cast<size_t>(reference_age)) {
+      selected[i]=&found->second;retained[i]=1;
+    } else {
+      local[i]=make_reference(previous_raw,previous[i],previous_orientation);selected[i]=&local[i];
+    }
+  }
+  workers->run(ids.size(),[&](size_t i) {
+    const Reference *reference=selected[i];if(!reference)return;
     cv::Point2f prediction,result=current[i]; Eigen::Matrix2d affine;
     const Eigen::Matrix3d rotation=orientation*reference->orientation.transpose();
-    bool success=project(*camera,rotation,reference->point,prediction,&affine) && align(*reference,current_raw,affine,result,error[i]);
-    if (success) {
-      current[i]=result; ++stats.refinements;
-      if (retained) ++stats.references;
-      if (mode=="reference" && !retained) references[ids[i]]=std::move(local);
+    success[i]=project(*camera,rotation,reference->point,prediction,&affine) && align(*reference,current_raw,affine,result,error[i]);
+    if(success[i]) current[i]=result;
+  });
+  for(size_t i=0;i<ids.size();++i) {
+    if(!selected[i])continue;
+    if (success[i]) {
+      ++stats.refinements;
+      if (retained[i]) ++stats.references;
+      if (mode=="reference" && !retained[i]) references[ids[i]]=std::move(local[i]);
     } else {
       ++stats.rejected;
       // A changed viewpoint may invalidate the old reference. Preserve the independently
       // successful frame-to-frame LK result and re-anchor, rather than killing the track.
-      if (retained) references.erase(ids[i]);
+      if (retained[i]) references.erase(ids[i]);
     }
   }
 }

@@ -43,7 +43,10 @@ void TrackKLT::set_gyro_mode(const std::string &mode, int reference_age) {
   for (const auto &camera : camera_calib) {
     frame_times[camera.first]=-1;
     gyro_raw_last[camera.first]; gyro_raw_current[camera.first];
-    if (mode!="none") gyro_trackers[camera.first]=std::make_shared<GyroKLT>(camera.second,mode,win_size.width,reference_age);
+    if (mode!="none") {
+      const int threads=std::max(1,std::min(4,cv::getNumThreads()/static_cast<int>(camera_calib.size())));
+      gyro_trackers[camera.first]=std::make_shared<GyroKLT>(camera.second,mode,win_size.width,reference_age,threads);
+    }
   }
 }
 

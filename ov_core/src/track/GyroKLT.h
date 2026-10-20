@@ -17,7 +17,8 @@ public:
   struct Statistics {
     size_t predictions = 0, refinements = 0, references = 0, rejected = 0, missing_frames = 0;
   };
-  GyroKLT(std::shared_ptr<CamBase> camera, std::string mode, int window, int reference_age = 20);
+  GyroKLT(std::shared_ptr<CamBase> camera, std::string mode, int window, int reference_age = 20, int threads = 1);
+  ~GyroKLT();
   void begin_frame(const Eigen::Matrix3d *previous_to_current);
   void seed(const std::vector<cv::Point2f> &previous, std::vector<cv::Point2f> &current);
   void refine(const std::vector<cv::Mat> &previous_raw, const std::vector<cv::Mat> &current_raw,
@@ -52,6 +53,8 @@ private:
   Eigen::Matrix3d step = Eigen::Matrix3d::Identity(), previous_orientation = Eigen::Matrix3d::Identity(),
                   orientation = Eigen::Matrix3d::Identity();
   std::unordered_map<size_t, Reference> references;
+  struct Workers;
+  std::unique_ptr<Workers> workers;
   Statistics stats;
 };
 } // namespace ov_core

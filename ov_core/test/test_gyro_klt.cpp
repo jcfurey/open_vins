@@ -102,6 +102,21 @@ TEST(GyroKlt, InvalidRotationAndUnavailablePredictionPreserveNativeInitialGuess)
   EXPECT_THROW(ov_core::GyroKLT(pinhole(),"other",15),std::invalid_argument);
 }
 
+TEST(GyroKlt, ParallelPatchFitsMatchSerialCoordinatesAndReferenceLifecycleExactly) {
+  const auto base=texture();const auto old=points();const auto feature_ids=ids(old.size());
+  ov_core::GyroKLT serial(pinhole(),"reference",15,20,1),parallel(pinhole(),"reference",15,20,4);
+  auto previous=old;
+  for(int frame=1;frame<5;++frame) {
+    const double angle=.02;const auto R=ov_core::exp_so3(Eigen::Vector3d(0,0,angle));
+    const auto before=pyramid(transform(base,(frame-1)*angle,{})),after=pyramid(transform(base,frame*angle,{}));
+    auto a=previous,b=previous;serial.begin_frame(&R);parallel.begin_frame(&R);serial.seed(previous,a);parallel.seed(previous,b);
+    std::vector<uchar> status(previous.size(),1);std::vector<float> ae(previous.size(),0),be=ae;
+    serial.refine(before,after,previous,feature_ids,a,status,ae);parallel.refine(before,after,previous,feature_ids,b,status,be);
+    EXPECT_EQ(a,b);EXPECT_EQ(ae,be);EXPECT_EQ(serial.statistics().refinements,parallel.statistics().refinements);
+    EXPECT_EQ(serial.statistics().references,parallel.statistics().references);previous=a;
+  }
+}
+
 TEST(GyroKlt, StereoFeedsKeepRawViewsAndFeatureIdsAcrossReferenceTracking) {
   std::unordered_map<size_t,std::shared_ptr<ov_core::CamBase>> cams{{0,pinhole()},{1,pinhole()}};
   ov_core::TrackKLT tracker(cams,120,0,true,ov_core::TrackBase::HISTOGRAM,10,4,3,8,3,15);
