@@ -34,7 +34,29 @@
 
 using namespace ov_core;
 
+void TrackKLT::set_letnet_tracker(const std::string &model_path, double minimum_score) {
+  if (histogram_method != HistogramMethod::NONE || neural_flow || observation_uncertainty)
+    throw std::invalid_argument("LET-Net requires histogram_method=NONE and a separate native covariance/KLTNet selection");
+  if (!std::isfinite(minimum_score) || minimum_score < 0 || minimum_score > 1)
+    throw std::invalid_argument("letnet_min_score must be in [0,1]");
+  learned_features = std::make_shared<LearnedFeatures>(model_path);
+  letnet_minimum_score = minimum_score;
+  for (const auto &camera : camera_calib) {
+    score_current[camera.first];
+    score_last[camera.first];
+  }
+}
+
+void TrackKLT::advance_buffers(size_t camera) {
+  std::swap(img_last.at(camera), img_curr.at(camera));
+  img_pyramid_last.at(camera).swap(img_pyramid_curr.at(camera));
+  if (learned_features)
+    std::swap(score_last.at(camera), score_current.at(camera));
+}
+
 void TrackKLT::set_neural_tracker(const std::string &model_path, const std::string &target, double min_confidence) {
+  if (learned_features)
+    throw std::invalid_argument("Select only one learned tracking frontend");
   if (!std::isfinite(min_confidence) || min_confidence < 0)
     throw std::invalid_argument("kltnet_min_confidence must be finite and nonnegative");
   neural_flow = std::make_shared<NeuralFlow>(model_path, target);
@@ -42,6 +64,8 @@ void TrackKLT::set_neural_tracker(const std::string &model_path, const std::stri
 }
 
 void TrackKLT::set_observation_uncertainty(bool enabled, const std::map<size_t, Eigen::VectorXd> &extrinsics) {
+  if (enabled && learned_features)
+    throw std::invalid_argument("RDIC patch uncertainty currently expects grayscale native LK features");
   observation_uncertainty = enabled;
   if (!enabled)
     return;
@@ -110,7 +134,13 @@ void TrackKLT::feed_new_camera(const CameraData &message) {
     }
 
     // Extract image pyramid
-    cv::buildOpticalFlowPyramid(img, img_pyramid_curr.at(cam_id), win_size, pyr_levels);
+    if (learned_features) {
+      auto features = learned_features->infer(img);
+      score_current.at(cam_id) = std::move(features.score);
+      cv::buildOpticalFlowPyramid(features.tracking, img_pyramid_curr.at(cam_id), win_size, pyr_levels);
+    } else {
+      cv::buildOpticalFlowPyramid(img, img_pyramid_curr.at(cam_id), win_size, pyr_levels);
+    }
   }
 
   // Either call our stereo or monocular version
@@ -157,7 +187,8 @@ TrackKLT::MonocularTrack TrackKLT::track_monocular(const CameraData &message, si
   // If we didn't have any successful tracks last time, just extract this time
   // This also handles, the tracking initalization on the first call to this extractor
   if (pts_last.at(cam_id).empty()) {
-    perform_detection_monocular(track.imgpyr, track.mask, track.pts, track.ids, track.detected);
+    perform_detection_monocular(track.imgpyr, track.mask, track.pts, track.ids, track.detected,
+                                 learned_features ? &score_current.at(cam_id) : nullptr);
     return track;
   }
 
@@ -165,7 +196,8 @@ TrackKLT::MonocularTrack TrackKLT::track_monocular(const CameraData &message, si
   // This will "top-off" our number of tracks so always have a constant number
   auto pts_left_old = pts_last.at(cam_id);
   auto ids_left_old = ids_last.at(cam_id);
-  perform_detection_monocular(img_pyramid_last.at(cam_id), img_mask_last.at(cam_id), pts_left_old, ids_left_old, track.detected);
+  perform_detection_monocular(img_pyramid_last.at(cam_id), img_mask_last.at(cam_id), pts_left_old, ids_left_old, track.detected,
+                               learned_features ? &score_last.at(cam_id) : nullptr);
   const auto time_detect = boost::posix_time::microsec_clock::local_time();
 
   // Our return success masks, and predicted new features
@@ -242,8 +274,7 @@ void TrackKLT::commit_monocular(const CameraData &message, MonocularTrack &track
 
   // Move forward in time
   std::lock_guard<std::mutex> lckv(mtx_last_vars);
-  std::swap(img_last.at(cam_id), img_curr.at(cam_id));
-  img_pyramid_last.at(cam_id).swap(img_pyramid_curr.at(cam_id));
+  advance_buffers(cam_id);
   img_mask_last.at(cam_id) = track.mask;
   pts_last.at(cam_id) = track.pts;
   ids_last.at(cam_id) = track.ids;
@@ -273,13 +304,13 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
     std::vector<cv::KeyPoint> good_left, good_right;
     std::vector<size_t> good_ids_left, good_ids_right;
     perform_detection_stereo(imgpyr_left, imgpyr_right, mask_left, mask_right, cam_id_left, cam_id_right, good_left, good_right,
-                             good_ids_left, good_ids_right);
+                             good_ids_left, good_ids_right,
+                             learned_features ? &score_current.at(cam_id_left) : nullptr,
+                             learned_features ? &score_current.at(cam_id_right) : nullptr);
     // Save the current image and pyramid
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    std::swap(img_last.at(cam_id_left), img_curr.at(cam_id_left));
-    std::swap(img_last.at(cam_id_right), img_curr.at(cam_id_right));
-    img_pyramid_last.at(cam_id_left).swap(img_pyramid_curr.at(cam_id_left));
-    img_pyramid_last.at(cam_id_right).swap(img_pyramid_curr.at(cam_id_right));
+    advance_buffers(cam_id_left);
+    advance_buffers(cam_id_right);
     img_mask_last[cam_id_left] = mask_left;
     img_mask_last[cam_id_right] = mask_right;
     pts_last[cam_id_left] = good_left;
@@ -298,7 +329,8 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   auto ids_right_old = ids_last[cam_id_right];
   perform_detection_stereo(img_pyramid_last[cam_id_left], img_pyramid_last[cam_id_right], img_mask_last[cam_id_left],
                            img_mask_last[cam_id_right], cam_id_left, cam_id_right, pts_left_old, pts_right_old, ids_left_old,
-                           ids_right_old);
+                           ids_right_old, learned_features ? &score_last.at(cam_id_left) : nullptr,
+                           learned_features ? &score_last.at(cam_id_right) : nullptr);
   rT3 = boost::posix_time::microsec_clock::local_time();
 
   // Our return success masks, and predicted new features
@@ -337,10 +369,8 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   // If any of our masks are empty, that means we didn't have enough to do ransac, so just return
   if (mask_ll.empty() && mask_rr.empty()) {
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    std::swap(img_last.at(cam_id_left), img_curr.at(cam_id_left));
-    std::swap(img_last.at(cam_id_right), img_curr.at(cam_id_right));
-    img_pyramid_last.at(cam_id_left).swap(img_pyramid_curr.at(cam_id_left));
-    img_pyramid_last.at(cam_id_right).swap(img_pyramid_curr.at(cam_id_right));
+    advance_buffers(cam_id_left);
+    advance_buffers(cam_id_right);
     img_mask_last[cam_id_left] = mask_left;
     img_mask_last[cam_id_right] = mask_right;
     pts_last[cam_id_left].clear();
@@ -482,10 +512,8 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
   // Move forward in time
   {
     std::lock_guard<std::mutex> lckv(mtx_last_vars);
-    std::swap(img_last.at(cam_id_left), img_curr.at(cam_id_left));
-    std::swap(img_last.at(cam_id_right), img_curr.at(cam_id_right));
-    img_pyramid_last.at(cam_id_left).swap(img_pyramid_curr.at(cam_id_left));
-    img_pyramid_last.at(cam_id_right).swap(img_pyramid_curr.at(cam_id_right));
+    advance_buffers(cam_id_left);
+    advance_buffers(cam_id_right);
     img_mask_last[cam_id_left] = mask_left;
     img_mask_last[cam_id_right] = mask_right;
     pts_last[cam_id_left] = good_left;
@@ -507,7 +535,7 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left, size_t
 }
 
 void TrackKLT::perform_detection_monocular(const std::vector<cv::Mat> &img0pyr, const cv::Mat &mask0, std::vector<cv::KeyPoint> &pts0,
-                                           std::vector<size_t> &ids0, size_t &detected) {
+                                           std::vector<size_t> &ids0, size_t &detected, const cv::Mat *score) {
 
   // Create a 2D occupancy grid for this current image
   // Note that we scale this down, so that each grid point is equal to a set of pixels
@@ -605,7 +633,10 @@ void TrackKLT::perform_detection_monocular(const std::vector<cv::Mat> &img0pyr, 
     }
   }
   std::vector<cv::KeyPoint> pts0_ext;
-  Grider_GRID::perform_griding(img0pyr.at(0), mask0_updated, valid_locs, pts0_ext, num_features, grid_x, grid_y, threshold, true);
+  if (score)
+    LearnedFeatures::detect(*score, mask0_updated, valid_locs, pts0_ext, num_features_grid, grid_x, grid_y, letnet_minimum_score);
+  else
+    Grider_GRID::perform_griding(img0pyr.at(0), mask0_updated, valid_locs, pts0_ext, num_features, grid_x, grid_y, threshold, true);
 
   // Now, reject features that are close a current feature
   std::vector<cv::KeyPoint> kpts0_new;
@@ -639,7 +670,8 @@ void TrackKLT::perform_detection_monocular(const std::vector<cv::Mat> &img0pyr, 
 
 void TrackKLT::perform_detection_stereo(const std::vector<cv::Mat> &img0pyr, const std::vector<cv::Mat> &img1pyr, const cv::Mat &mask0,
                                         const cv::Mat &mask1, size_t cam_id_left, size_t cam_id_right, std::vector<cv::KeyPoint> &pts0,
-                                        std::vector<cv::KeyPoint> &pts1, std::vector<size_t> &ids0, std::vector<size_t> &ids1) {
+                                        std::vector<cv::KeyPoint> &pts1, std::vector<size_t> &ids0, std::vector<size_t> &ids1,
+                                        const cv::Mat *score0, const cv::Mat *score1) {
 
   // Create a 2D occupancy grid for this current image
   // Note that we scale this down, so that each grid point is equal to a set of pixels
@@ -739,7 +771,10 @@ void TrackKLT::perform_detection_stereo(const std::vector<cv::Mat> &img0pyr, con
       }
     }
     std::vector<cv::KeyPoint> pts0_ext;
-    Grider_GRID::perform_griding(img0pyr.at(0), mask0_updated, valid_locs, pts0_ext, num_features, grid_x, grid_y, threshold, true);
+    if (score0)
+      LearnedFeatures::detect(*score0, mask0_updated, valid_locs, pts0_ext, num_features_grid, grid_x, grid_y, letnet_minimum_score);
+    else
+      Grider_GRID::perform_griding(img0pyr.at(0), mask0_updated, valid_locs, pts0_ext, num_features, grid_x, grid_y, threshold, true);
 
     // Now, reject features that are close a current feature
     std::vector<cv::KeyPoint> kpts0_new;
@@ -915,7 +950,10 @@ void TrackKLT::perform_detection_stereo(const std::vector<cv::Mat> &img0pyr, con
       }
     }
     std::vector<cv::KeyPoint> pts1_ext;
-    Grider_GRID::perform_griding(img1pyr.at(0), mask1_updated, valid_locs, pts1_ext, num_features, grid_x, grid_y, threshold, true);
+    if (score1)
+      LearnedFeatures::detect(*score1, mask1_updated, valid_locs, pts1_ext, num_features_grid, grid_x, grid_y, letnet_minimum_score);
+    else
+      Grider_GRID::perform_griding(img1pyr.at(0), mask1_updated, valid_locs, pts1_ext, num_features, grid_x, grid_y, threshold, true);
 
     // Now, reject features that are close a current feature
     for (auto &kpt : pts1_ext) {

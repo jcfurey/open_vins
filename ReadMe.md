@@ -237,6 +237,38 @@ feature, clone, calibration, initialization, and transport settings.
 
 #### Learned tracking integration
 
+`tracking_backend: letnet_onnx` runs the author-trained grayscale
+[LET-Net](https://github.com/linyicheng1/LET-NET) model. Learned corner scores
+replace FAST detection and three learned feature channels replace grayscale
+intensity for temporal and stereo LK. Raw grayscale images remain available for
+visualization. All inference and tracking run in C++; no Python runtime is added
+to the estimator. Camera resolution, pixel coordinates and calibration are retained.
+
+Build with `-DENABLE_LETNET_ONNX=ON` and rebuild all three VIO packages. Set
+`histogram_method: NONE`, `letnet_model_path` to the prepared graph, and optionally
+`letnet_min_score` (default 0.2, range [0,1]). The score cutoff is an empirical
+corner-selection threshold, not a calibrated measurement uncertainty. The
+`ros2_euroc_letnet_template.yaml` preset has an empty model path and requires a
+prepared author model before startup. RDIC's photometric covariance currently
+requires native grayscale LK, so LET-Net supports `standard` or `fej2` updates.
+
+The workspace `scripts/prepare_open_vins_letnet.py --output <model.onnx>` downloads
+the pinned author grayscale checkpoint and requires Python `onnx` for preparation
+only. It checks the upstream SHA-256, preserves every trained initializer, and
+exposes the existing sigmoid heads at dynamic image resolution. This removes
+fixed-size Gather/Unsqueeze export handling without retraining, resizing camera
+images or changing learned weights. A JSON receipt records input/output conventions
+and both hashes. The upstream and prepared feature/score outputs are identical at
+the original export resolution in the integration check. Weights stay outside the
+source repository. The method is described in
+[Breaking of brightness consistency in optical flow with a lightweight CNN network](https://arxiv.org/abs/2310.15655).
+
+The workspace `scripts/benchmark_open_vins_learned.py --output <directory>` compares
+histogram KLT, raw-image KLT and LET-Net at 1×, with equal thread counts and dense600
+estimator budgets. It fingerprints the real model and all three loaded libraries,
+preserves failures, and uses ground truth only for scoring. Runtime/accuracy must
+be qualified on the target machine; the optional frontend is disabled by default.
+
 The optional `kltnet_onnx` frontend loads a **complete trained sparse tracker**
 through OpenCV DNN. It retains each feature's original reference patch and previous
 displacement, handles feature-ID reassignment and dead-track cleanup, rejects

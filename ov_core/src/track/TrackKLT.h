@@ -25,6 +25,7 @@
 #include "TrackBase.h"
 #include "TrackQuality.h"
 #include "NeuralFlow.h"
+#include "LearnedFeatures.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -90,6 +91,9 @@ public:
   /// Select a complete trained sparse-tracking graph. Failure to load is fatal; there is no silent LK fallback.
   void set_neural_tracker(const std::string &model_path, const std::string &target, double min_confidence);
 
+  /// Use LET-Net corner scores and learned image features for detection and temporal/stereo LK.
+  void set_letnet_tracker(const std::string &model_path, double minimum_score);
+
 protected:
   /// One camera's tracking result. New features carry pending ids until commit_monocular() applies the result.
   struct MonocularTrack {
@@ -138,7 +142,7 @@ protected:
    * Passed images should already be grayscaled.
    */
   void perform_detection_monocular(const std::vector<cv::Mat> &img0pyr, const cv::Mat &mask0, std::vector<cv::KeyPoint> &pts0,
-                                   std::vector<size_t> &ids0, size_t &detected);
+                                   std::vector<size_t> &ids0, size_t &detected, const cv::Mat *score = nullptr);
 
   /**
    * @brief Detects new features in the current stereo pair
@@ -160,7 +164,8 @@ protected:
    */
   void perform_detection_stereo(const std::vector<cv::Mat> &img0pyr, const std::vector<cv::Mat> &img1pyr, const cv::Mat &mask0,
                                 const cv::Mat &mask1, size_t cam_id_left, size_t cam_id_right, std::vector<cv::KeyPoint> &pts0,
-                                std::vector<cv::KeyPoint> &pts1, std::vector<size_t> &ids0, std::vector<size_t> &ids1);
+                                std::vector<cv::KeyPoint> &pts1, std::vector<size_t> &ids0, std::vector<size_t> &ids1,
+                                const cv::Mat *score0 = nullptr, const cv::Mat *score1 = nullptr);
 
   /**
    * @brief KLT track between two images, and do RANSAC afterwards
@@ -211,6 +216,10 @@ protected:
   bool observation_uncertainty = false;
   std::shared_ptr<NeuralFlow> neural_flow;
   double neural_min_confidence = 0.1;
+  std::shared_ptr<LearnedFeatures> learned_features;
+  double letnet_minimum_score = 0.2;
+  std::map<size_t, cv::Mat> score_current, score_last;
+  void advance_buffers(size_t camera);
   std::map<size_t, Eigen::Matrix4d> quality_extrinsics;
   std::map<size_t, std::unordered_map<size_t, size_t>> quality_ages;
 

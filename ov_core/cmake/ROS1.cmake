@@ -50,6 +50,7 @@ list(APPEND LIBRARY_SOURCES
         src/track/TrackKLT.cpp
         src/track/TrackQuality.cpp
         src/track/NeuralFlow.cpp
+        src/track/LearnedFeatures.cpp
         src/track/TrackSIM.cpp
         src/types/Landmark.cpp
         src/feat/Feature.cpp

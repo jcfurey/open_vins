@@ -144,6 +144,10 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
     if (params.tracking_backend == "kltnet_onnx")
       std::static_pointer_cast<TrackKLT>(trackFEATS)->set_neural_tracker(params.kltnet_model_path, params.kltnet_target,
                                                                       params.kltnet_min_confidence);
+    if (params.tracking_backend == "letnet_onnx") {
+      std::static_pointer_cast<TrackKLT>(trackFEATS)->set_letnet_tracker(params.letnet_model_path, params.letnet_min_score);
+      PRINT_INFO("[LETNET] author-trained full-resolution feature tracking: %s\n", params.letnet_model_path.c_str());
+    }
   } else {
     trackFEATS = std::shared_ptr<TrackBase>(new TrackDescriptor(
         state->_cam_intrinsics_cameras, init_max_features, state->_options.max_aruco_features, params.use_stereo, params.histogram_method,

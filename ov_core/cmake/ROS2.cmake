@@ -41,6 +41,7 @@ list(APPEND LIBRARY_SOURCES
         src/track/TrackKLT.cpp
         src/track/TrackQuality.cpp
         src/track/NeuralFlow.cpp
+        src/track/LearnedFeatures.cpp
         src/track/TrackSIM.cpp
         src/types/Landmark.cpp
         src/feat/Feature.cpp
@@ -107,6 +108,15 @@ if(BUILD_TESTING)
     target_link_libraries(test_observation_quality ov_core_lib)
     ament_add_gtest(test_neural_flow test/test_neural_flow.cpp)
     target_link_libraries(test_neural_flow ov_core_lib)
+    ament_add_gtest(test_learned_features test/test_learned_features.cpp)
+    target_link_libraries(test_learned_features ov_core_lib)
+    set(LETNET_TEST_MODEL "" CACHE FILEPATH "Prepared author-trained LET-Net graph for optional integration tests")
+    if(ENABLE_LETNET_ONNX AND LETNET_TEST_MODEL)
+        if(NOT EXISTS "${LETNET_TEST_MODEL}")
+            message(FATAL_ERROR "LETNET_TEST_MODEL does not exist")
+        endif()
+        target_compile_definitions(test_learned_features PRIVATE LETNET_TEST_MODEL="${LETNET_TEST_MODEL}")
+    endif()
     if(ENABLE_KLTNET_ONNX)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
         set(SPARSE_TRACKER_FIXTURE "${CMAKE_CURRENT_BINARY_DIR}/sparse_tracker_contract_fixture.onnx")

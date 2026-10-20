@@ -463,10 +463,20 @@ struct VioManagerOptions {
   std::string kltnet_model_path;
   std::string kltnet_target = "cpu";
   double kltnet_min_confidence = 0.1;
+  std::string letnet_model_path;
+  double letnet_min_score = 0.2;
 
   void configure_tracking() const {
-    if (tracking_backend != "native" && tracking_backend != "kltnet_onnx")
-      throw std::invalid_argument("tracking_backend must be native or kltnet_onnx");
+    if (tracking_backend != "native" && tracking_backend != "kltnet_onnx" && tracking_backend != "letnet_onnx")
+      throw std::invalid_argument("tracking_backend must be native, kltnet_onnx or letnet_onnx");
+    if (tracking_backend == "letnet_onnx") {
+      if (!use_klt || letnet_model_path.empty() || histogram_method != ov_core::TrackBase::NONE)
+        throw std::invalid_argument("letnet_onnx requires use_klt=true, histogram_method=NONE and a prepared letnet_model_path");
+      if (!std::isfinite(letnet_min_score) || letnet_min_score < 0 || letnet_min_score > 1)
+        throw std::invalid_argument("letnet_min_score must be in [0,1]");
+      if (msckf_options.use_observation_covariance)
+        throw std::invalid_argument("RDIC photometric covariance currently expects native grayscale LK; select standard or fej2 with LET-Net");
+    }
     if (tracking_backend == "kltnet_onnx") {
       if (!use_klt || kltnet_model_path.empty())
         throw std::invalid_argument("kltnet_onnx requires use_klt=true and kltnet_model_path pointing to a trained export");
@@ -563,6 +573,8 @@ struct VioManagerOptions {
       parser->parse_config("kltnet_model_path", kltnet_model_path, false);
       parser->parse_config("kltnet_target", kltnet_target, false);
       parser->parse_config("kltnet_min_confidence", kltnet_min_confidence, false);
+      parser->parse_config("letnet_model_path", letnet_model_path, false);
+      parser->parse_config("letnet_min_score", letnet_min_score, false);
       std::string histogram_method_str = "HISTOGRAM";
       parser->parse_config("histogram_method", histogram_method_str);
       if (histogram_method_str == "NONE") {

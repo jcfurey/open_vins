@@ -1,0 +1,40 @@
+# Requires a prepared author-trained grayscale LET-Net graph; see prepare_open_vins_letnet.py.
+# Supply letnet_model_path. Full camera resolution and pixel coordinates are retained.
+/**:
+  ros__parameters:
+    init_dyn_min_features: 25
+    init_dyn_mle_max_threads: 1
+    init_dyn_use: true
+    num_opencv_threads: 8
+    try_zupt: true
+    verbosity: INFO
+    zupt_only_at_beginning: true
+    use_sim_time: true
+    executor_threads: 1
+    qos_overrides./imu0.subscription.reliability: reliable
+    qos_overrides./imu0.subscription.depth: 1000
+    qos_overrides./cam0/image_raw.subscription.reliability: reliable
+    qos_overrides./cam0/image_raw.subscription.depth: 64
+    qos_overrides./cam1/image_raw.subscription.reliability: reliable
+    qos_overrides./cam1/image_raw.subscription.depth: 64
+    trackhist.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth.enable_pub_plugins:
+    - image_transport/raw
+    loop_depth_colored.enable_pub_plugins:
+    - image_transport/raw
+    calib_cam_extrinsics: false
+    calib_cam_timeoffset: false
+    max_slam: 60
+    max_msckf_in_update: 120
+    num_pts: 600
+    camera_qos_depth: 64
+    max_camera_queue_size: 64
+    max_clones: 25
+    klt_pyramid_levels: 3
+    klt_window_size: 15
+    tracking_backend: letnet_onnx
+    letnet_model_path: ''
+    letnet_min_score: 0.2
+    visual_update_backend: standard
+    histogram_method: NONE
