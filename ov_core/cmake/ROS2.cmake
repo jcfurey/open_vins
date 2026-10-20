@@ -39,6 +39,7 @@ list(APPEND LIBRARY_SOURCES
         src/track/TrackAruco.cpp
         src/track/TrackDescriptor.cpp
         src/track/TrackKLT.cpp
+        src/track/GyroKLT.cpp
         src/track/TrackQuality.cpp
         src/track/NeuralFlow.cpp
         src/track/LearnedFeatures.cpp
@@ -102,6 +103,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_camera_models ov_core_lib)
     ament_add_gtest(test_klt_buffers test/test_klt_buffers.cpp)
     target_link_libraries(test_klt_buffers ov_core_lib)
+    ament_add_gtest(test_gyro_klt test/test_gyro_klt.cpp)
+    target_link_libraries(test_gyro_klt ov_core_lib)
     ament_add_gtest(test_klt_outliers test/test_klt_outliers.cpp)
     target_link_libraries(test_klt_outliers ov_core_lib)
     ament_add_gtest(test_observation_quality test/test_observation_quality.cpp)

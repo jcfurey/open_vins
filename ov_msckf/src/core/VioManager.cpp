@@ -141,6 +141,8 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
                                                          params.klt_ransac_valid_only));
     std::static_pointer_cast<TrackKLT>(trackFEATS)->set_observation_uncertainty(params.msckf_options.use_observation_covariance,
                                                                             params.camera_extrinsics);
+    std::static_pointer_cast<TrackKLT>(trackFEATS)->set_gyro_mode(params.gyro_klt_mode,params.gyro_klt_reference_age);
+    if (params.gyro_klt_mode!="none") PRINT_INFO("[GYRO-KLT] selected mode=%s\n",params.gyro_klt_mode.c_str());
     if (params.tracking_backend == "kltnet_onnx")
       std::static_pointer_cast<TrackKLT>(trackFEATS)->set_neural_tracker(params.kltnet_model_path, params.kltnet_target,
                                                                       params.kltnet_min_confidence);
@@ -312,6 +314,19 @@ void VioManager::track_image_and_update(const ov_core::CameraData &message_const
     for (const auto &camera : state->_calib_IMUtoCAM)
       extrinsics[camera.first] = camera.second->value();
     std::static_pointer_cast<TrackKLT>(trackFEATS)->set_observation_uncertainty(true, extrinsics);
+  }
+  if (params.use_klt && params.gyro_klt_mode!="none") {
+    auto tracker=std::static_pointer_cast<TrackKLT>(trackFEATS);
+    std::map<size_t,Eigen::Matrix3d> rotations;
+    // Keep initialization identical across modes. Never advance the filter to seed its own visual update.
+    if (is_initialized_vio) for (const auto camera : message.sensor_ids) {
+      Eigen::Matrix3d rotation;
+      if (propagator->predict_rotation(state,tracker->last_frame_time(camera),message.timestamp,rotation)) {
+        const Eigen::Matrix3d extrinsic=state->_calib_IMUtoCAM.at(camera)->Rot();
+        rotations[camera]=extrinsic*rotation*extrinsic.transpose();
+      }
+    }
+    tracker->set_gyro_predictions(message.timestamp,rotations);
   }
   trackFEATS->feed_new_camera(message);
 

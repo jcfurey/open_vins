@@ -48,6 +48,7 @@ list(APPEND LIBRARY_SOURCES
         src/track/TrackAruco.cpp
         src/track/TrackDescriptor.cpp
         src/track/TrackKLT.cpp
+        src/track/GyroKLT.cpp
         src/track/TrackQuality.cpp
         src/track/NeuralFlow.cpp
         src/track/LearnedFeatures.cpp

@@ -352,6 +352,37 @@ The enabled build passes 99 individual tests across core, initializer and
 estimator; the ONNX-disabled core separately passes 22 tests. Full results and
 source/library fingerprints are in the workspace report above.
 
+### Optional gyro-assisted KLT
+
+`gyro_klt_mode` is `none` by default. The independent experimental stages are
+`seed`, `affine`, and `reference`, and require native KLT with standard observation
+noise. They do not require a GPU or a neural model. All three keep the original
+native initialization; assistance starts after the estimator is initialized.
+
+`seed` integrates bias- and intrinsic-corrected gyro readings over the two camera
+timestamps, including the current camera/IMU clock offset and camera extrinsic
+rotation. Projection uses the camera's distortion model. This prediction does
+not advance the state, covariance, clones, or fast-odometry cache. Missing IMU
+coverage, internal gaps over 20 ms, and invalid intervals leave native LK active.
+
+`affine` adds local patch-shape compensation and robust translation/gain/offset
+refinement on the two finest **raw grayscale** pyramid levels. The ordinary
+histogram-based pyramidal LK supplies coarse matching. The final measurement
+remains a pixel in the original image, with translation determined visually.
+`reference` additionally retains owned templates for up to
+`gyro_klt_reference_age` frames (default 20). A failed old-template alignment
+falls back to the independent frame-to-frame match and clears that reference.
+Feature-ID reassignment, dead-track cleanup, image-buffer reuse, and unavailable
+motion are handled explicitly. Cumulative runtime counters show which stages
+actually ran. These are candidate accuracy changes, not established improvements.
+
+The workspace helper `scripts/benchmark_open_vins_gyro.py --output <directory>`
+runs all four modes twice on all five complete Machine Hall flights at 1× with
+rotated condition order, equal dense600 budgets and verified loaded libraries.
+Ground truth is consumed only by the scorer. The tests cover distorted point and
+patch projection, subpixel motion with brightness changes, template ownership,
+stereo feeds, bias/time-offset handling, and preservation of the filter state.
+
 ### Regression checks
 
 Build with `-DBUILD_TESTING=ON`, then run from the workspace root:

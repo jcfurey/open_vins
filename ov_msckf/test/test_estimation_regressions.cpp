@@ -370,3 +370,38 @@ TEST(Ros2PointCloud, SerializesCoordinatesInDeclaredFields) {
   EXPECT_FLOAT_EQ(*y, -5);
   EXPECT_FLOAT_EQ(*z, -6);
 }
+
+TEST(GyroPrediction, AppliesBiasIntrinsicsAndClockOffsetWithoutChangingFilterState) {
+  auto s=state();
+  Eigen::VectorXd diagonal(6);diagonal<<1,0,0,1,0,1;
+  s->_calib_imu_dw->set_value(diagonal);s->_calib_imu_da->set_value(diagonal);
+  s->_calib_imu_tg->set_value(Eigen::VectorXd::Zero(9));
+  s->_calib_dt_CAMtoIMU->set_value(Eigen::VectorXd::Constant(1,.017));
+  s->_imu->bg()->set_value(Eigen::Vector3d(.01,-.02,.08));
+  s->_timestamp=10;
+  const auto original=s->_imu->value();
+  const auto covariance=StateHelper::get_full_covariance(s);
+  Propagator propagator(NoiseManager(),9.81);
+  for(int i=0;i<=20;++i) {
+    ov_core::ImuData sample;sample.timestamp=10+.005*i;
+    sample.wm=Eigen::Vector3d(.01,-.02,.08+2*(sample.timestamp-10));sample.am=Eigen::Vector3d(0,0,9.81);
+    propagator.feed_imu(sample);
+  }
+  Eigen::Matrix3d rotation;
+  ASSERT_TRUE(propagator.predict_rotation(s,10,10.05,rotation));
+  const double angle=.067*.067-.017*.017;
+  EXPECT_LT((rotation-ov_core::exp_so3(Eigen::Vector3d(0,0,-angle))).norm(),1e-10);
+  EXPECT_EQ(s->_imu->value(),original);EXPECT_DOUBLE_EQ(s->_timestamp,10);
+  EXPECT_TRUE(s->_clones_IMU.empty());EXPECT_EQ(StateHelper::get_full_covariance(s),covariance);
+}
+
+TEST(GyroPrediction, RefusesMissingCoverageInternalGapsAndReversedTime) {
+  auto s=state();Propagator propagator(NoiseManager(),9.81);
+  propagator.feed_imu(imu(1));propagator.feed_imu(imu(1.05));
+  Eigen::Matrix3d result=Eigen::Matrix3d::Constant(7);
+  EXPECT_FALSE(propagator.predict_rotation(s,1,1.05,result));
+  EXPECT_FALSE(propagator.predict_rotation(s,.99,1.05,result));
+  EXPECT_FALSE(propagator.predict_rotation(s,1.05,1,result));
+  EXPECT_FALSE(propagator.predict_rotation(s,1,1,result));
+  EXPECT_EQ(result,Eigen::Matrix3d::Constant(7));
+}

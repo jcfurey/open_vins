@@ -26,6 +26,7 @@
 #include "TrackQuality.h"
 #include "NeuralFlow.h"
 #include "LearnedFeatures.h"
+#include "GyroKLT.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -93,6 +94,14 @@ public:
 
   /// Use LET-Net corner scores and learned image features for detection and temporal/stereo LK.
   void set_letnet_tracker(const std::string &model_path, double minimum_score, const std::string &engine = "opencv", int threads = 4);
+
+  /// Configure before feeding frames. Predictions are supplied serially by the estimator, without updating its state.
+  void set_gyro_mode(const std::string &mode, int reference_age = 20);
+  double last_frame_time(size_t camera) const { return frame_times.at(camera); }
+  void set_gyro_predictions(double timestamp, const std::map<size_t, Eigen::Matrix3d> &rotations) {
+    prediction_timestamp = timestamp;
+    gyro_predictions = rotations;
+  }
 
 protected:
   /// One camera's tracking result. New features carry pending ids until commit_monocular() applies the result.
@@ -219,6 +228,13 @@ protected:
   std::shared_ptr<LearnedFeatures> learned_features;
   double letnet_minimum_score = 0.2;
   std::map<size_t, cv::Mat> score_current, score_last;
+  std::string gyro_mode = "none";
+  std::map<size_t, std::shared_ptr<GyroKLT>> gyro_trackers;
+  std::map<size_t, std::vector<cv::Mat>> gyro_raw_last, gyro_raw_current;
+  std::map<size_t, double> frame_times;
+  std::map<size_t, Eigen::Matrix3d> gyro_predictions;
+  double prediction_timestamp = -1;
+  size_t gyro_frames = 0;
   void advance_buffers(size_t camera);
   std::map<size_t, Eigen::Matrix4d> quality_extrinsics;
   std::map<size_t, std::unordered_map<size_t, size_t>> quality_ages;

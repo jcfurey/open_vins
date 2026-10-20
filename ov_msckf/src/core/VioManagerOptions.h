@@ -467,8 +467,15 @@ struct VioManagerOptions {
   double letnet_min_score = 0.2;
   std::string letnet_inference_backend = "opencv";
   int letnet_inference_threads = 4;
+  std::string gyro_klt_mode = "none";
+  int gyro_klt_reference_age = 20;
 
   void configure_tracking() const {
+    if ((gyro_klt_mode!="none" && gyro_klt_mode!="seed" && gyro_klt_mode!="affine" && gyro_klt_mode!="reference") ||
+        gyro_klt_reference_age<1 || gyro_klt_reference_age>100)
+      throw std::invalid_argument("gyro_klt_mode must be none, seed, affine or reference; reference age must be 1..100 frames");
+    if (gyro_klt_mode!="none" && (!use_klt || tracking_backend!="native" || msckf_options.use_observation_covariance))
+      throw std::invalid_argument("Gyro KLT requires native KLT and standard observation noise");
     if (tracking_backend != "native" && tracking_backend != "kltnet_onnx" && tracking_backend != "letnet_onnx")
       throw std::invalid_argument("tracking_backend must be native, kltnet_onnx or letnet_onnx");
     if (tracking_backend == "letnet_onnx") {
@@ -574,6 +581,8 @@ struct VioManagerOptions {
       parser->parse_config("klt_window_size", klt_window_size, false);
       parser->parse_config("klt_max_fb_error", klt_max_fb_error, false);
       parser->parse_config("klt_ransac_valid_only", klt_ransac_valid_only, false);
+      parser->parse_config("gyro_klt_mode", gyro_klt_mode, false);
+      parser->parse_config("gyro_klt_reference_age", gyro_klt_reference_age, false);
       parser->parse_config("tracking_backend", tracking_backend, false);
       parser->parse_config("kltnet_model_path", kltnet_model_path, false);
       parser->parse_config("kltnet_target", kltnet_target, false);

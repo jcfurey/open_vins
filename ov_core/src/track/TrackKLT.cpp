@@ -34,6 +34,19 @@
 
 using namespace ov_core;
 
+void TrackKLT::set_gyro_mode(const std::string &mode, int reference_age) {
+  if (mode != "none" && (neural_flow || learned_features || observation_uncertainty))
+    throw std::invalid_argument("Gyro KLT currently requires native tracking and standard observation noise");
+  if (mode != "none" && mode != "seed" && mode != "affine" && mode != "reference")
+    throw std::invalid_argument("gyro_klt_mode must be none, seed, affine or reference");
+  gyro_mode=mode;
+  for (const auto &camera : camera_calib) {
+    frame_times[camera.first]=-1;
+    gyro_raw_last[camera.first]; gyro_raw_current[camera.first];
+    if (mode!="none") gyro_trackers[camera.first]=std::make_shared<GyroKLT>(camera.second,mode,win_size.width,reference_age);
+  }
+}
+
 void TrackKLT::set_letnet_tracker(const std::string &model_path, double minimum_score, const std::string &engine, int threads) {
   if (histogram_method != HistogramMethod::NONE || neural_flow || observation_uncertainty)
     throw std::invalid_argument("LET-Net requires histogram_method=NONE and a separate native covariance/KLTNet selection");
@@ -52,6 +65,8 @@ void TrackKLT::advance_buffers(size_t camera) {
   img_pyramid_last.at(camera).swap(img_pyramid_curr.at(camera));
   if (learned_features)
     std::swap(score_last.at(camera), score_current.at(camera));
+  if (gyro_mode=="affine" || gyro_mode=="reference")
+    gyro_raw_last.at(camera).swap(gyro_raw_current.at(camera));
 }
 
 void TrackKLT::set_neural_tracker(const std::string &model_path, const std::string &target, double min_confidence) {
@@ -141,6 +156,14 @@ void TrackKLT::feed_new_camera(const CameraData &message) {
     } else {
       cv::buildOpticalFlowPyramid(img, img_pyramid_curr.at(cam_id), win_size, pyr_levels);
     }
+    if (gyro_mode!="none") {
+      const auto rotation=gyro_predictions.find(cam_id);
+      const bool valid=std::abs(prediction_timestamp-message.timestamp)<1e-7 && frame_times.at(cam_id)>=0 &&
+                       message.timestamp>frame_times.at(cam_id) && rotation!=gyro_predictions.end();
+      gyro_trackers.at(cam_id)->begin_frame(valid ? &rotation->second : nullptr);
+      if (gyro_mode!="seed")
+        cv::buildOpticalFlowPyramid(message.images.at(msg_id),gyro_raw_current.at(cam_id),win_size,1);
+    }
   }
 
   // Either call our stereo or monocular version
@@ -162,6 +185,22 @@ void TrackKLT::feed_new_camera(const CameraData &message) {
   } else {
     PRINT_ERROR(RED "[ERROR]: invalid number of images passed %zu, we only support mono or stereo tracking", num_images);
     std::exit(EXIT_FAILURE);
+  }
+  if (gyro_mode!="none") {
+    for (const auto camera : message.sensor_ids) {
+      frame_times.at(camera)=message.timestamp;
+      gyro_trackers.at(camera)->retain(ids_last.at(camera));
+    }
+    if (++gyro_frames%200==0) {
+      GyroKLT::Statistics total;
+      for (const auto &camera : gyro_trackers) {
+        const auto s=camera.second->statistics();
+        total.predictions+=s.predictions;total.refinements+=s.refinements;total.references+=s.references;
+        total.rejected+=s.rejected;total.missing_frames+=s.missing_frames;
+      }
+      PRINT_INFO("[GYRO-KLT] mode=%s predicted=%zu refined=%zu reference=%zu fallback=%zu missing_frames=%zu\n",
+                 gyro_mode.c_str(),total.predictions,total.refinements,total.references,total.rejected,total.missing_frames);
+    }
   }
 }
 
@@ -251,13 +290,15 @@ void TrackKLT::commit_monocular(const CameraData &message, MonocularTrack &track
   // Lock this data feed for this camera
   const size_t cam_id = track.cam_id;
   std::lock_guard<std::mutex> lck(mtx_feeds.at(cam_id));
-  const auto previous_ids = neural_flow ? track.ids : std::vector<size_t>();
+  const auto previous_ids = neural_flow || gyro_mode!="none" ? track.ids : std::vector<size_t>();
   resolve_pending_ids(track.ids, track.detected);
   if (neural_flow) {
     for (size_t i = 0; i < track.ids.size(); ++i)
       neural_flow->rekey(cam_id, previous_ids[i], track.ids[i]);
     neural_flow->retain(cam_id, track.ids);
   }
+  if (gyro_mode!="none")
+    for (size_t i=0;i<track.ids.size();++i) gyro_trackers.at(cam_id)->rekey(previous_ids[i],track.ids[i]);
 
   // Update our feature database, with theses new observations
   if (track.update_database) {
@@ -1006,6 +1047,8 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::
   std::vector<float> error;
   cv::TermCriteria term_crit = cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 30, 0.01);
   const bool learned = neural_flow && id0 == id1;
+  const bool gyro = gyro_mode!="none" && id0==id1 && gyro_trackers.at(id0)->valid();
+  if (gyro) gyro_trackers.at(id0)->seed(pts0,pts1);
   if (learned) {
     if (!feature_ids || feature_ids->size() != pts0.size())
       throw std::invalid_argument("Learned temporal tracking requires stable feature IDs");
@@ -1030,6 +1073,8 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr, const std::
   } else {
     cv::calcOpticalFlowPyrLK(img0pyr, img1pyr, pts0, pts1, mask_klt, error, win_size, pyr_levels, term_crit, cv::OPTFLOW_USE_INITIAL_FLOW);
   }
+  if (gyro && feature_ids && gyro_mode!="seed")
+    gyro_trackers.at(id0)->refine(gyro_raw_last.at(id0),gyro_raw_current.at(id0),pts0,*feature_ids,pts1,mask_klt,error);
 
   if (diagnostics) {
     std::vector<std::pair<float, size_t>> candidates;

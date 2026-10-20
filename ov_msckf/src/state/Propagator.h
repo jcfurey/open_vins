@@ -110,6 +110,10 @@ public:
    */
   void propagate_and_clone(std::shared_ptr<State> state, double timestamp);
 
+  /// Rotation-only, read-only motion aid between two camera timestamps. Does not alter
+  /// state, covariance, clones, propagation offset, or fast-odometry cache. Fails on missing IMU coverage.
+  bool predict_rotation(std::shared_ptr<State> state, double camera_time0, double camera_time1, Eigen::Matrix3d &previous_to_current);
+
   /**
    * @brief Gets what the state and its covariance will be at a given timestamp
    *

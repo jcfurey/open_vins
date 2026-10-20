@@ -145,6 +145,37 @@ void Propagator::propagate_and_clone(std::shared_ptr<State> state, double timest
   StateHelper::augment_clone(state, last_w);
 }
 
+bool Propagator::predict_rotation(std::shared_ptr<State> state, double camera_time0, double camera_time1,
+                                  Eigen::Matrix3d &previous_to_current) {
+  if (!std::isfinite(camera_time0) || !std::isfinite(camera_time1) || camera_time0<0 ||
+      camera_time1<=camera_time0 || camera_time1-camera_time0>1) return false;
+  const double offset=state->_calib_dt_CAMtoIMU->value()(0);
+  std::vector<ov_core::ImuData> data;
+  {
+    std::lock_guard<std::mutex> lock(imu_data_mtx);
+    data=select_imu_readings(imu_data,camera_time0+offset,camera_time1+offset,false);
+  }
+  if (data.size()<2) return false;
+  const Eigen::Matrix3d Dw=State::Dm(state->_options.imu_model,state->_calib_imu_dw->value());
+  const Eigen::Matrix3d Da=State::Dm(state->_options.imu_model,state->_calib_imu_da->value());
+  const Eigen::Matrix3d Tg=State::Tg(state->_calib_imu_tg->value());
+  const Eigen::Matrix3d gyro=state->_calib_imu_GYROtoIMU->Rot()*Dw;
+  const Eigen::Matrix3d accel=state->_calib_imu_ACCtoIMU->Rot()*Da;
+  auto corrected=[&](const ov_core::ImuData &sample)->Eigen::Vector3d {
+    return gyro*(sample.wm-state->_imu->bias_g()-Tg*accel*(sample.am-state->_imu->bias_a()));
+  };
+  Eigen::Matrix3d result=Eigen::Matrix3d::Identity();
+  for (size_t i=1;i<data.size();++i) {
+    const double dt=data[i].timestamp-data[i-1].timestamp;
+    if (dt<=0 || dt>.02+1e-9) return false;
+    const Eigen::Vector3d w=.5*(corrected(data[i-1])+corrected(data[i]));
+    if (!w.allFinite()) return false;
+    result=exp_so3(-dt*w)*result;
+  }
+  previous_to_current=result;
+  return true;
+}
+
 bool Propagator::fast_state_propagate(std::shared_ptr<State> state, double timestamp, Eigen::Matrix<double, 13, 1> &state_plus,
                                       Eigen::Matrix<double, 12, 12> &covariance) {
 
